@@ -130,7 +130,7 @@ def test_loaded_history_shows_overview_tables_and_completeness(
     assert metrics["Buys (filled)"] == "2" and metrics["Sells (filled)"] == "1"
     completeness = at.dataframe[0].value
     assert set(completeness["State"]) == {"Complete"} and list(completeness["Records"]) == [4, 4, 2]
-    assert len(at.dataframe) >= 5  # completeness + 3 record tables + (readiness is text)
+    assert len(at.dataframe) >= 4  # completeness + 3 record tables
     performance = " ".join(i.value for i in at.info)
     assert "time weighted return: unavailable" in performance
     assert "portfolio equity curve: unavailable" in performance
