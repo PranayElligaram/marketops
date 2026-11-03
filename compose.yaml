@@ -1,0 +1,87 @@
+name: marketops
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: marketops
+      POSTGRES_USER: marketops
+      POSTGRES_PASSWORD: ${MARKETOPS_DB_PASSWORD:?Copy .env.example to .env and set password}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # No host-published database port; connect from the Compose network only.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U marketops -d marketops"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      target: api
+    environment:
+      MARKETOPS_ENVIRONMENT: ${MARKETOPS_ENVIRONMENT:-development}
+      MARKETOPS_LOG_LEVEL: ${MARKETOPS_LOG_LEVEL:-INFO}
+      MARKETOPS_DATABASE_URL: postgresql+psycopg://marketops:${MARKETOPS_DB_PASSWORD:?Set local DB password}@db:5432/marketops
+      MARKETOPS_T212_API_KEY: ${MARKETOPS_T212_API_KEY:-}
+      MARKETOPS_T212_API_SECRET: ${MARKETOPS_T212_API_SECRET:-}
+      MARKETOPS_T212_ENVIRONMENT: ${MARKETOPS_T212_ENVIRONMENT:-demo}
+      MARKETOPS_T212_ALLOW_LIVE: ${MARKETOPS_T212_ALLOW_LIVE:-false}
+      MARKETOPS_DATA_DIR: /data/raw
+      MARKETOPS_MODEL_DIR: /artifacts/models
+      # Ollama runs on the host (models and any GPU stay there); this stack never publishes it.
+      MARKETOPS_OLLAMA_BASE_URL: ${MARKETOPS_OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      MARKETOPS_OLLAMA_MODEL: ${MARKETOPS_OLLAMA_MODEL:-qwen3.5:4b}
+      MARKETOPS_AGENT_ALLOW_BROKER_PORTFOLIO: ${MARKETOPS_AGENT_ALLOW_BROKER_PORTFOLIO:-false}
+      # Guards /portfolio/overview and broker-backed agent runs. Only the API receives it;
+      # the dashboard container never gets the secret (the user types it per session).
+      MARKETOPS_AGENT_API_TOKEN: ${MARKETOPS_AGENT_API_TOKEN:-}
+    volumes:
+      # Local market data and trained models: read-only, never baked into the image.
+      - ./data/raw:/data/raw:ro
+      - ./artifacts/models:/artifacts/models:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:${MARKETOPS_API_PORT:-8001}:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=4)"
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+
+  dashboard:
+    build:
+      context: .
+      target: dashboard
+    environment:
+      MARKETOPS_API_BASE_URL: http://api:8000
+    ports:
+      - "127.0.0.1:${MARKETOPS_DASHBOARD_PORT:-8503}:8501"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health', timeout=4)"
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  pgdata:

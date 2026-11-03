@@ -1,0 +1,41 @@
+name: CI
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+      - name: Install quality dependencies
+        run: python -m pip install -c constraints.txt -e '.[dev,train,ui,tracking]'
+      - name: Ruff lint
+        run: ruff check .
+      - name: Ruff formatting
+        run: ruff format --check .
+      - name: Mypy
+        run: mypy src api
+      - name: Offline tests (includes MLflow, SHAP and end-to-end training/API tests)
+        run: pytest -q -p no:cacheprovider --cov=marketops --cov=api --cov-report=term-missing:skip-covered
+      - name: Verify pinned versions are what was installed
+        run: |
+          python - <<'PY'
+          import importlib.metadata as m, sys
+          bad = []
+          for line in open("constraints.txt"):
+              if "==" in line and not line.startswith("#"):
+                  name, ver = line.strip().split("==")
+                  if m.version(name) != ver:
+                      bad.append((name, ver, m.version(name)))
+          sys.exit(f"version drift: {bad}" if bad else 0)
+          PY
+      - name: Build API image
+        run: docker build --target api -t marketops-api:ci .
+      - name: Build dashboard image
+        run: docker build --target dashboard -t marketops-dashboard:ci .

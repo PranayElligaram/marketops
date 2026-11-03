@@ -1,0 +1,54 @@
+[build-system]
+requires = ["hatchling>=1.26,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "marketops"
+version = "0.1.0"
+description = "Local-first stock research and portfolio intelligence"
+readme = "README.md"
+requires-python = ">=3.13,<3.14"
+license = "MIT"
+dependencies = [
+    "fastapi>=0.115,<1",
+    "uvicorn[standard]>=0.34,<1",
+    "pydantic-settings>=2.8,<3",
+    "SQLAlchemy>=2.0,<3",
+    "psycopg[binary]>=3.2,<4",
+    "httpx>=0.28,<1",
+]
+
+[project.optional-dependencies]
+ui = ["streamlit>=1.44,<2", "pandas>=2.2,<3"]
+train = ["numpy>=2.1,<3", "pandas>=2.2,<3", "scikit-learn>=1.6,<2", "xgboost>=3.0,<4", "joblib>=1.4,<2"]
+tracking = ["mlflow>=3.0,<4", "shap>=0.48,<1", "matplotlib>=3.9,<4"]
+agent = ["ollama>=0.4,<1"]
+dev = ["pytest>=8.3,<10", "pytest-cov>=6,<9", "ruff>=0.11,<1", "mypy>=1.15,<2", "pandas-stubs"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/marketops"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "."]
+addopts = "-ra"
+# SQLite (offline tests only) stores Numeric as float; PostgreSQL is verified by the integration tests.
+filterwarnings = ["ignore:Dialect sqlite.*Decimal"]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+extend-exclude = ["data", "artifacts"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+mypy_path = "src"
+exclude = "^(data|artifacts)/"
+
+[[tool.mypy.overrides]]
+module = ["sklearn.*", "joblib", "xgboost", "mlflow.*", "shap"]
+ignore_missing_imports = true
