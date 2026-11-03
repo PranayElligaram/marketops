@@ -16,6 +16,7 @@ build/
 .vscode/
 .idea/
 data/raw/*
+data/market/*
 !data/raw/.gitkeep
 artifacts/*
 !artifacts/.gitkeep
@@ -36,3 +37,4 @@ pgdata/
 .coverage.*
 *;[A-Z]/
 /tmp/
+!data/market/.gitkeep

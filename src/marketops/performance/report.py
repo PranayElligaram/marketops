@@ -709,11 +709,10 @@ def build_report(
         )
     )
     unavailable = {
-        "time_weighted_return": "Needs the portfolio value just before every external flow. No "
-        "historical valuations exist: only the current snapshot is available.",
-        "portfolio_equity_curve": "Needs daily positions x historical prices x FX. No historical "
-        "prices for the instruments held, no FX history and no corporate-action records are "
-        "stored, so a curve would be invented.",
+        "time_weighted_return": "Not part of this report. Daily valuation and time-weighted "
+        "return are computed by GET /performance/valuation from cached prices and FX.",
+        "portfolio_equity_curve": "Not part of this report; see GET /performance/valuation "
+        "(a day is valued only with verified symbols, a recent close and any needed FX).",
         "total_return_pct": "Needs a time-weighted return or a defined invested base; "
         "net gain over net deposits ignores when money was added. Use the XIRR above.",
         "benchmark_comparison": "Needs a verified portfolio return series on the same dates and "

@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     t212_api_secret: str = ""
     data_dir: str = "data/raw"
     model_dir: str = "artifacts/models"
+    # Writable local cache of provider prices and ECB FX used for historical valuation.
+    market_cache_dir: str = "data/market"
     ollama_base_url: str = "http://127.0.0.1:11434"
     ollama_model: str = "qwen3.5:4b"
     agent_timeout_s: float = 300.0

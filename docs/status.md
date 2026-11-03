@@ -1,4 +1,4 @@
-# MarketOps Status (updated 2026-10-29, after agent-hardening milestone)
+# MarketOps Status (updated 2026-11-03, after historical valuation milestone)
 
 Full findings: `docs/technical-audit.md`. Not production-ready: this is a research tool with no demonstrated
 predictive edge.
@@ -135,6 +135,49 @@ api/dashboard/db healthy; broker request without token refused (403).
 **Read-only Trading 212 readiness:** not yet. Needed first: authenticate or remove `/portfolio/overview`, wire the
 token through Compose/dashboard, and test the real broker response shape with a demo-environment key (needs user
 action). The agent-side controls (opt-in flag, token, weights only, withheld evidence/hashes, no write tools) are in place.
+
+## Verified historical valuation and time-weighted performance (2026-11-03)
+Design, conventions and limits: `docs/valuation.md`. Code: `src/marketops/valuation/`, routes
+`GET /performance/valuation` and `POST /performance/valuation/refresh` (token protected), dashboard section
+under the Historical performance tab. No model, threshold, agent or broker-write change; XIRR is untouched.
+
+**Implemented:** instrument mapping verified against the account's own fills (fully sold instruments included,
+GBX/GBp handling, local override file); daily bars cache with null-bar removal; ECB reference FX through
+Frankfurter with freshness/completeness validation; event-driven daily NAV (shares from executed fills, provider
+split restatement, ambiguity refusal when the broker also reports a corporate action, bounded price/FX staleness,
+negative-cash guard); cash ledger identical to the broker-reconciled ledger (dividends only as cash, never via
+adjusted prices); net invested capital vs NAV; time-weighted return with explicit flow timing and a start-of-day
+sensitivity; segments across gaps; annualised volatility (>= 60 returns), maximum drawdown (>= 20), annualised
+return (>= 1 year); monthly/annual returns with a `complete` flag; reconciliation of split-adjusted shares and
+last-close NAV to the live snapshot; Streamlit charts (NAV vs net invested, TWR index, drawdown, period tables).
+
+**Live read-only verification (private figures deliberately not recorded):**
+- All instruments ever traded, including a fully sold one, mapped to provider symbols and verified from their own
+  fills (100 % of fills inside the daily range; currencies agree). One renamed legacy ticker initially FAILED
+  verification (the provider assigns the old symbol to a different company) and was fixed with a local override,
+  which then verified; this is the intended behaviour.
+- Price coverage: every weekday from the first record to the snapshot date valued (no unvalued days) after null
+  holiday bars were dropped (two were found and initially produced unvalued days). Some days use a prior close and
+  are flagged stale. FX: USD and EUR legs available for the whole period; the account currency is the base.
+- Reconciliation: share counts equal the broker's; last-close NAV agrees with the live total to well under the 1.5 %
+  `match` tolerance; the overall valuation status is `verified`.
+- Metrics available: NAV, net invested capital, net gain, time-weighted return (+ timing sensitivity), annualised
+  TWR, annualised volatility, maximum drawdown, monthly and annual tables.
+- Sanity: NAV positive on every day, no daily time-weighted return beyond 15 %, TWR and NAV gain have the same sign.
+- Defects found live: the ECB bulk CSV served stale data (now rejected; Frankfurter used); a ticker rename; null
+  provider bars; the zero placeholder in the ECB CSV for one currency.
+
+**Tests:** 533 passed, 9 skipped (opt-in PostgreSQL) locally; Ruff, `ruff format --check` and strict mypy
+(`src api`) clean; Docker PostgreSQL integration 26 passed, 1 skipped (mlflow absent from the slim image) including
+a valuation test on PostgreSQL; api/dashboard/db healthy; `/performance/valuation` 401 without the token. New tests
+(`test_valuation_core.py`, `test_valuation_report.py`): holdings and cash, splits, multiple currencies, missing
+FX/prices, flow timing, deposits/withdrawals, dividends, TWR, drawdown, reconciliation failures, API
+authentication and dashboard rendering. The dashboard was exercised with Streamlit AppTest, not in a browser.
+
+**Limits:** free personal-use price data with no second source for closes; no interpretation of mergers,
+spin-offs or ticker changes (a renamed symbol must be overridden by hand); corporate-action fills from the broker
+make that instrument unvalued from that date; the account had no corporate action, so real split handling is
+verified only on synthetic data; daily closes only; benchmark comparison not implemented.
 
 ## Exact next action
 Initialise Git (with approval) so artefacts can record a commit, then decide the next milestone: a point-in-time,
@@ -335,6 +378,5 @@ the report needs a fresh sync to reproduce cash exactly (events after the last s
 
 ## Exact next action
 Add the three history scopes to the key, press **Sync account history** (Portfolio activity tab), then review the completeness
-table, the `TRANSFER`/unclassified counts and the reported-realised-P/L reconciliation. Holdings reconstruction and XIRR are now done (section above). Next milestone: store historical prices
-and FX for the held instruments (point-in-time, with corporate actions) so a validated daily equity curve and time-weighted return can be
-built and checked against the verified snapshot.
+table, the `TRANSFER`/unclassified counts and the reported-realised-P/L reconciliation. Holdings reconstruction and XIRR are now done (section above). Next milestone: benchmark comparison (same dates and currency), a second price source to cross-check closes,
+and interpretation of broker-reported corporate actions.

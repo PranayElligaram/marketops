@@ -52,6 +52,89 @@ def get(path: str, token_key: str | None = None, **params: Any) -> Any:
         return None, "Cannot reach the MarketOps API."
 
 
+def _render_valuation(val: dict[str, Any]) -> None:
+    banner = {"verified": st.success, "partial": st.warning, "unavailable": st.info}[
+        val["overall_status"]
+    ]
+    banner(
+        f"{val['account_currency'] or '?'} valuation status **{val['overall_status']}** "
+        f"as of {val['as_of_utc'][:19]} UTC."
+    )
+    for note in val["notes"]:
+        st.caption(note)
+    cov = val["coverage"]
+    st.caption(
+        f"Valuation days: {cov['valued_days']} of {cov['weekdays']} weekdays valued"
+        + (
+            f" ({cov['stale_price_days']} using a price older than the day)"
+            if cov["valued_days"]
+            else ""
+        )
+        + "."
+    )
+    for code, n in cov["unvalued_reasons"].items():
+        st.warning(f"{n} weekday(s) not valued: {code.replace('_', ' ')}.")
+    for m in val["mapping"]:
+        if m["status"] != "verified":
+            st.warning(
+                f"Instrument {m['ticker']} is {m['status']} "
+                f"(symbol {m['symbol'] or 'none'}): " + " ".join(m["reasons"])
+            )
+    rec = val["reconciliation"]
+    for r in rec["reasons"]:
+        st.warning(r)
+    labels = {
+        "portfolio_nav": "Portfolio value (NAV)",
+        "net_invested_capital": "Net invested capital",
+        "net_gain_on_invested_capital": "Net gain on invested capital",
+        "time_weighted_return": "Time-weighted return",
+        "annualised_twr": "Annualised time-weighted return",
+        "annualised_volatility": "Annualised volatility",
+        "max_drawdown": "Maximum drawdown",
+        "twr_flow_timing_sensitivity": "Flow-timing sensitivity",
+    }
+    for m in val["metrics"]:
+        label = labels.get(m["name"], m["name"])
+        unit = m["unit"] or ""
+        if m["value"] is None:
+            st.info(f"{label}: unavailable. " + " ".join(m["blockers"][:2]))
+            continue
+        text = (
+            f"{m['value']:,.2f} {unit}"
+            if unit not in ("fraction", "fraction/yr")
+            else f"{m['value']:.2%}"
+        )
+        if m["status"] == "available":
+            st.metric(label, text, help=m["basis"])
+        else:
+            st.warning(
+                f"{label}: not verified. Unverified value: {text}. " + " ".join(m["blockers"])
+            )
+    s = pd.DataFrame(val["series"])
+    if not s.empty:
+        s["date"] = pd.to_datetime(s["date"])
+        s = s.set_index("date")
+        st.markdown("**Portfolio value vs net invested capital**")
+        st.line_chart(s[["nav", "net_invested"]])
+        idx = s["twr_index"].dropna()
+        if not idx.empty:
+            st.markdown("**Time-weighted growth index** (restarts at 1.0 after any gap)")
+            st.line_chart(idx)
+            st.markdown("**Drawdown of the time-weighted index**")
+            st.area_chart(idx / idx.cummax() - 1.0)
+    for name, key in (("Monthly", "monthly"), ("Annual", "annual")):
+        rows = val[key]
+        if rows:
+            st.markdown(f"**{name} time-weighted return** (incomplete periods are marked)")
+            df = pd.DataFrame(rows).rename(
+                columns={"period": "Period", "twr": "TWR", "days": "Days", "complete": "Complete"}
+            )
+            st.dataframe(df.style.format({"TWR": "{:.2%}"}), width="stretch", hide_index=True)
+    with st.expander("Conventions"):
+        for k, v in val["conventions"].items():
+            st.markdown(f"- **{k.replace('_', ' ')}**: {v}")
+
+
 st.title("MarketOps")
 st.caption("Stock research and portfolio intelligence | Local-first | Read-only")
 st.warning(
@@ -554,6 +637,37 @@ with tab_perf:
         if perf["external_flows"]:
             with st.expander("External cash flows used (investor-signed)"):
                 st.dataframe(pd.DataFrame(perf["external_flows"]), width="stretch", hide_index=True)
+
+    st.divider()
+    st.subheader("Historical valuation and time-weighted performance")
+    st.caption(
+        "Daily portfolio value from your reconstructed holdings and cash, public daily prices "
+        "(personal-use provider, cached locally) and ECB reference FX. A day is valued only when "
+        "every held instrument has a verified symbol, a recent close and any needed FX rate; "
+        "gaps are shown as gaps. Time-weighted return removes the effect of deposit timing and "
+        "is separate from the money-weighted XIRR above."
+    )
+    v1, v2 = st.columns(2)
+    if v1.button("Calculate historical valuation", type="primary"):
+        st.session_state.val, st.session_state.val_err = get(
+            "/performance/valuation", token_key=tkp
+        )
+    if v2.button("Download prices and FX (public data)"):
+        st.session_state.val_refresh, st.session_state.val_refresh_err = post(
+            "/performance/valuation/refresh", {}, token_key=tkp
+        )
+    if st.session_state.get("val_refresh_err"):
+        st.error(f"Download failed: {st.session_state.val_refresh_err}")
+    elif st.session_state.get("val_refresh"):
+        st.caption(
+            "Download results: "
+            + "; ".join(f"{k}: {v}" for k, v in st.session_state.val_refresh.items())
+        )
+    if st.session_state.get("val_err"):
+        st.error(f"Could not calculate: {st.session_state.val_err}")
+    val = st.session_state.get("val")
+    if val:
+        _render_valuation(val)
 
 
 # ---------------------------------------------------------------- stock research

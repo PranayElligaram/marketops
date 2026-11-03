@@ -48,6 +48,7 @@ def parse_chart(payload: Any, symbol: str) -> pd.DataFrame:
         quote = result["indicators"]["quote"][0]
         adj = result["indicators"]["adjclose"][0]["adjclose"]
         tz = result["meta"].get("exchangeTimezoneName", "America/New_York")
+        currency = result["meta"].get("currency")
         cols = {k: quote[k] for k in ("open", "high", "low", "close", "volume")}
     except ProviderError:
         raise
@@ -73,7 +74,9 @@ def parse_chart(payload: Any, symbol: str) -> pd.DataFrame:
                 df.loc[d, "split"] = float(e["numerator"]) / float(e["denominator"])
     except (KeyError, TypeError, ValueError, ZeroDivisionError) as exc:
         raise ProviderError(f"{symbol}: malformed corporate-action event") from exc
-    return df.reset_index()
+    out = df.reset_index()
+    out.attrs["currency"] = currency
+    return out
 
 
 class YahooProvider:

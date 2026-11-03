@@ -53,6 +53,7 @@ MLflow, Ollama (local models only), Docker Compose, pytest, Ruff, strict Mypy, G
   with completeness auditing.
 - **Performance reconstruction:** event-driven holdings and cash ledger from executed fills, reconciled to the
   broker snapshot, plus a money-weighted return (XIRR) that is refused when its preconditions fail.
+- **Historical valuation:** daily GBP NAV from reconstructed holdings, cached public prices and ECB FX; net invested capital, time-weighted return, volatility, drawdown and period returns, each gated on reconciliation to the broker ([docs/valuation.md](docs/valuation.md)).
 - **Research agent:** a local Ollama model that calls bounded tools; its claims are checked against tool evidence.
 - **Security:** token-protected private routes, secret redaction, live-account double opt-in.
 
@@ -141,8 +142,8 @@ GitHub Actions needs no secrets, broker account or local services.
 
 - No demonstrated predictive skill; treat all model output as research noise.
 - Reconstruction cannot prove history reaches account opening; corporate actions are flagged, not applied.
-- Time-weighted return, equity curve and benchmark comparison are unavailable until historical prices, FX and
-  corporate-action data are added (in progress).
+- No benchmark comparison yet; price data is a single free personal-use source; broker-reported corporate
+  actions make an instrument unvalued rather than being interpreted.
 - Beta broker API; schema changes cause the system to fail closed.
 - Local single-user design; no authentication beyond a shared token, no hosted deployment.
 

@@ -30,6 +30,7 @@ services:
       MARKETOPS_T212_ALLOW_LIVE: ${MARKETOPS_T212_ALLOW_LIVE:-false}
       MARKETOPS_DATA_DIR: /data/raw
       MARKETOPS_MODEL_DIR: /artifacts/models
+      MARKETOPS_MARKET_CACHE_DIR: /data/market
       # Ollama runs on the host (models and any GPU stay there); this stack never publishes it.
       MARKETOPS_OLLAMA_BASE_URL: ${MARKETOPS_OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       MARKETOPS_OLLAMA_MODEL: ${MARKETOPS_OLLAMA_MODEL:-qwen3.5:4b}
@@ -41,6 +42,8 @@ services:
       # Local market data and trained models: read-only, never baked into the image.
       - ./data/raw:/data/raw:ro
       - ./artifacts/models:/artifacts/models:ro
+      # Public prices and FX cached for valuation; the only writable data mount.
+      - ./data/market:/data/market
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:

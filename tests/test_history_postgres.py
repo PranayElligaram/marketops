@@ -10,6 +10,7 @@ import os
 import uuid
 from collections.abc import Iterator
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine, func, insert, select, text
@@ -147,3 +148,21 @@ def test_historical_performance_report_on_postgres(pg: Engine) -> None:
     gain = next(m for m in rep.metrics if m.name == "net_gain_on_invested_capital")
     assert gain.value is not None and abs(gain.value["gain"] - 56.2) < 1e-9
     assert rep.xirr is not None and rep.xirr.status == "ok"
+
+
+def test_historical_valuation_on_postgres(pg: Engine, tmp_path: Path) -> None:
+    from marketops.valuation.service import compute_valuation
+    from tests.test_perf_report import snapshot
+    from tests.test_valuation_report import _install_market_cache
+
+    sync_account_history(pg, FakeSource(standard_pages()), pacer=fast_pacer())
+    key = make_account_key("demo", 424242)
+    cov = read.coverage(pg, "demo", key, False)
+    mp = pytest.MonkeyPatch()
+    try:
+        root = _install_market_cache(tmp_path, mp)
+    finally:
+        mp.undo()
+    val = compute_valuation(pg, "demo", key, cov, snapshot(), root)
+    assert val.overall_status == "verified" and val.reconciliation.status == "match"
+    assert val.coverage.unvalued_days == 0
