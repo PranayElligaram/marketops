@@ -1,4 +1,4 @@
-# MarketOps Status (updated 2026-11-03, after historical valuation milestone)
+# MarketOps Status (updated 2026-11-03, after Historical Performance dashboard milestone)
 
 Full findings: `docs/technical-audit.md`. Not production-ready: this is a research tool with no demonstrated
 predictive edge.
@@ -380,3 +380,14 @@ the report needs a fresh sync to reproduce cash exactly (events after the last s
 Add the three history scopes to the key, press **Sync account history** (Portfolio activity tab), then review the completeness
 table, the `TRANSFER`/unclassified counts and the reported-realised-P/L reconciliation. Holdings reconstruction and XIRR are now done (section above). Next milestone: benchmark comparison (same dates and currency), a second price source to cross-check closes,
 and interpretation of broker-reported corporate actions.
+
+## Historical Performance dashboard redesign (2026-11-03)
+Presentation-only change; calculations, API, ML and agent code untouched. See "Dashboard presentation" in
+`docs/valuation.md`. New `app/perf_view.py`; tab rewritten in `app/dashboard.py`; tests in `tests/test_perf_view.py`
+(synthetic fixtures only), wording assertions updated in `tests/test_perf_report.py` and `tests/test_valuation_report.py`.
+- Verification: unit tests of KPI values/states/period filtering/chart specs against API-shaped data, and Streamlit
+  AppTest renders (these are not a browser). Browser check: one manual Chrome pass against a synthetic stub API
+  (structure, KPI grid, charts, tables, expanders rendered). The browser viewport was extremely large and screenshot
+  zoom failed ("Detached"), so fine visual density at common desktop widths was NOT visually confirmed in a browser.
+- UI wording changed from "verified" to reconciliation-status labels; API statuses are unchanged.
+

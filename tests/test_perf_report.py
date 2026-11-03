@@ -401,12 +401,12 @@ def test_dashboard_renders_verified_metrics_and_unavailable_reasons(
     assert not any("reconciliation status" in s.value for s in at.success)  # nothing before click
     _calculate(at)
     assert not at.exception and not at.error
-    assert any("reconciliation status **verified**" in s.value for s in at.success)
+    assert any("reconciliation status **Reconciled**" in s.value for s in at.success)
     labels = {m.label: m.value for m in at.metric}
     assert labels["Net invested capital"].startswith("amount 650.00")
     assert "per year" in labels["Money-weighted return (XIRR)"]
     unavailable = " ".join(i.value for i in at.info)
-    assert "Time-weighted return: unavailable" in unavailable
+    assert "Total time-weighted return: unavailable" in unavailable
     assert "Portfolio equity curve: unavailable" in unavailable
     assert "Positions" in labels and "Cash ledger" in labels
 

@@ -5,6 +5,7 @@ from typing import Any
 
 import httpx
 import pandas as pd
+import perf_view as pv
 import streamlit as st
 
 st.set_page_config(page_title="MarketOps", page_icon="📈", layout="wide")
@@ -52,87 +53,227 @@ def get(path: str, token_key: str | None = None, **params: Any) -> Any:
         return None, "Cannot reach the MarketOps API."
 
 
-def _render_valuation(val: dict[str, Any]) -> None:
-    banner = {"verified": st.success, "partial": st.warning, "unavailable": st.info}[
-        val["overall_status"]
-    ]
-    banner(
-        f"{val['account_currency'] or '?'} valuation status **{val['overall_status']}** "
-        f"as of {val['as_of_utc'][:19]} UTC."
-    )
-    for note in val["notes"]:
-        st.caption(note)
-    cov = val["coverage"]
+def _metric_text(m: dict[str, Any]) -> str:
+    v = m.get("value") or {}
+    ccy = m.get("unit") or ""
+    if m["name"] == "money_weighted_return_xirr":
+        return f"{v['annualised_rate'] * 100:.2f}% per year"
+    parts = [f"{k.replace('_', ' ')} {x:,.2f} {ccy}".strip() for k, x in v.items() if k != "count"]
+    return "; ".join(parts)
+
+
+def _kpi_grid(val: dict[str, Any], perf: dict[str, Any] | None) -> None:
+    for row in pv.build_kpis(val, perf):
+        for col, k in zip(st.columns(len(row)), row, strict=True):
+            with col.container(border=True):
+                st.metric(k.label, k.value, help=k.help or None)
+                st.caption(k.source + (f" · {k.note}" if k.note else ""))
     st.caption(
-        f"Valuation days: {cov['valued_days']} of {cov['weekdays']} weekdays valued"
-        + (
-            f" ({cov['stale_price_days']} using a price older than the day)"
-            if cov["valued_days"]
+        "**Time-weighted return (TWR)** removes the effect of when you added or withdrew money, "
+        "so it shows how the investments performed. **XIRR** is the yearly rate on your actual "
+        "dated cash flows, so it also reflects the timing of your own deposits. They answer "
+        "different questions and are not expected to match."
+    )
+
+
+def _period_tables(val: dict[str, Any]) -> None:
+    st.markdown("**Monthly and annual time-weighted return**")
+    left, right = st.columns([3, 2])
+    for col, name, key in ((left, "Monthly", "monthly"), (right, "Annual", "annual")):
+        with col:
+            if not val[key]:
+                st.caption(f"{name}: no valuation periods yet.")
+                continue
+            table = pv.period_table(val[key])
+            st.dataframe(
+                pv.style_period_table(table),
+                hide_index=True,
+                width="stretch",
+                height=min(38 + 35 * len(table), 300),
+            )
+    st.caption("Partial periods contain fewer valued days than the full period.")
+
+
+def _charts(val: dict[str, Any]) -> None:
+    frame = pv.series_frame(val)
+    if frame.empty or frame["nav"].notna().sum() == 0:
+        st.info("No valued days yet, so there is nothing to chart. See data coverage below.")
+        return
+    period = st.segmented_control("Period", pv.PERIODS, default="ALL", key="perf_period") or "ALL"
+    shown = pv.filter_period(frame, period)
+    st.markdown("**Portfolio value vs net invested capital**")
+    st.altair_chart(pv.value_chart(shown, val["account_currency"]), width="stretch")
+    st.caption(
+        f"Showing {shown['date'].min():%d %b %Y} to {shown['date'].max():%d %b %Y}. Return and "
+        "drawdown are measured from the start of the full history, so the period selector only "
+        "changes what is displayed, never a calculated figure. Gaps mean no reconciled valuation."
+    )
+    if shown["twr"].notna().any():
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown("**Cumulative time-weighted return**")
+            st.altair_chart(pv.twr_chart(shown), width="stretch")
+        with c2:
+            st.markdown("**Drawdown from previous peak**")
+            st.altair_chart(pv.drawdown_chart(shown), width="stretch")
+
+
+def _valuation_details(val: dict[str, Any]) -> None:
+    cov, rec = val["coverage"], val["reconciliation"]
+    with st.expander("Reconciliation with the live account"):
+        diff = (
+            f" ({rec['difference_pct']:+.2%} on {rec['valuation_date']})"
+            if rec["difference_pct"] is not None
             else ""
         )
-        + "."
+        st.markdown(
+            f"- Closing-price value vs live Trading 212 total: "
+            f"**{rec['status'].replace('_', ' ')}**{diff}\n"
+            f"- Share counts: **{rec['quantity_status'].replace('_', ' ')}**"
+        )
+        if rec["holdings"]:
+            st.dataframe(pd.DataFrame(rec["holdings"]), hide_index=True, width="stretch")
+    with st.expander("Data coverage"):
+        fx = ", ".join(f"{c} {s.replace('_', ' ')}" for c, s in cov["fx_currencies"].items())
+        st.markdown(
+            f"- Range: {cov['first_day'] or '-'} to {cov['last_day'] or '-'}\n"
+            f"- Weekdays valued: **{cov['valued_days']} of {cov['weekdays']}** "
+            f"({cov['stale_price_days']} using a price older than the day)\n"
+            f"- Exchange rates: {fx or '-'}"
+        )
+        if cov["unvalued_reasons"]:
+            reasons = [
+                {"Reason": k.replace("_", " "), "Weekdays": n}
+                for k, n in cov["unvalued_reasons"].items()
+            ]
+            st.dataframe(pd.DataFrame(reasons), hide_index=True)
+    with st.expander("Price-provider and instrument-mapping diagnostics"):
+        if val["mapping"]:
+            mapping = pd.DataFrame(val["mapping"])
+            mapping["status"] = mapping["status"].map(lambda s: pv.MAPPING_LABEL.get(s, s))
+            mapping["reasons"] = mapping["reasons"].map(" ".join)
+            st.dataframe(mapping, hide_index=True, width="stretch")
+        else:
+            st.caption("No instruments.")
+    with st.expander("Assumptions and conventions"):
+        for k, v in val["conventions"].items():
+            st.markdown(f"- **{k.replace('_', ' ')}**: {v}")
+
+
+def _render_valuation(val: dict[str, Any], perf: dict[str, Any] | None = None) -> None:
+    status, cov = val["overall_status"], val["coverage"]
+    banner = {"verified": st.success, "partial": st.warning, "unavailable": st.info}[status]
+    banner(
+        f"**Historical closing-price valuation** ({val['account_currency'] or '?'}): "
+        f"reconciliation status **{pv.RECON_LABEL[status]}**. Valued "
+        f"{cov['first_day'] or '-'} to {cov['last_day'] or '-'}; calculated "
+        f"{val['as_of_utc'][:19]} UTC."
+    )
+    st.caption(
+        "Values use end-of-day closing prices and ECB reference exchange rates, so they can differ "
+        "from the live Trading 212 snapshot, which uses current broker prices."
     )
     for code, n in cov["unvalued_reasons"].items():
         st.warning(f"{n} weekday(s) not valued: {code.replace('_', ' ')}.")
     for m in val["mapping"]:
         if m["status"] != "verified":
             st.warning(
-                f"Instrument {m['ticker']} is {m['status']} "
-                f"(symbol {m['symbol'] or 'none'}): " + " ".join(m["reasons"])
+                f"Instrument {m['ticker']}: {pv.MAPPING_LABEL.get(m['status'], m['status'])} "
+                f"(symbol {m['symbol'] or 'none'}). " + " ".join(m["reasons"])
             )
-    rec = val["reconciliation"]
-    for r in rec["reasons"]:
+    for r in val["reconciliation"]["reasons"]:
         st.warning(r)
-    labels = {
-        "portfolio_nav": "Portfolio value (NAV)",
-        "net_invested_capital": "Net invested capital",
-        "net_gain_on_invested_capital": "Net gain on invested capital",
-        "time_weighted_return": "Time-weighted return",
-        "annualised_twr": "Annualised time-weighted return",
-        "annualised_volatility": "Annualised volatility",
-        "max_drawdown": "Maximum drawdown",
-        "twr_flow_timing_sensitivity": "Flow-timing sensitivity",
-    }
     for m in val["metrics"]:
-        label = labels.get(m["name"], m["name"])
-        unit = m["unit"] or ""
-        if m["value"] is None:
-            st.info(f"{label}: unavailable. " + " ".join(m["blockers"][:2]))
-            continue
-        text = (
-            f"{m['value']:,.2f} {unit}"
-            if unit not in ("fraction", "fraction/yr")
-            else f"{m['value']:.2%}"
+        if m["value"] is None and m["name"] not in pv.KPI_HELP:
+            st.info(f"{pv.label_for(m['name'])}: unavailable. " + " ".join(m["blockers"][:2]))
+    _kpi_grid(val, perf)
+    for note in val["notes"]:
+        st.caption(note)
+    _charts(val)
+    _period_tables(val)
+    _valuation_details(val)
+
+
+def _render_snapshot(perf: dict[str, Any], show_xirr: bool) -> None:
+    status = perf["overall_status"]
+    banner = {"verified": st.success, "partial": st.warning, "unverified": st.warning}[status]
+    banner(
+        f"**Live Trading 212 snapshot** ({perf['environment'].upper()} account, "
+        f"{perf['account_currency'] or '?'}): reconciliation status **{pv.RECON_LABEL[status]}** "
+        f"as of {perf['as_of_utc'][:19]} UTC."
+    )
+    st.caption(
+        "Current positions and cash read from Trading 212, compared with the history rebuilt from "
+        "stored orders and cash movements. XIRR uses this snapshot as its end value."
+    )
+    for note in perf["notes"]:
+        (st.caption if status == "verified" else st.warning)(note)
+    audit, hold, led = perf["data_audit"], perf["holdings"], perf["cash_ledger"]
+    for k in audit["kinds"]:
+        for c in k["checks"]:
+            if c["ok"] is not True:
+                st.warning(f"{k['kind']} - {c['name'].replace('_', ' ')}: {c['detail']}")
+    for issue in audit["issues"]:
+        st.warning(issue)
+    for reason in led["reasons"]:
+        st.warning(reason)
+    r1, r2 = st.columns(2)
+    r1.metric("Positions", hold["status"], f"{hold['matched']} of {hold['checked']} match")
+    r2.metric("Cash ledger", led["status"])
+    if led["difference"] is not None:
+        st.caption(
+            f"Cash implied by history minus broker cash: {led['difference']:+,.2f} "
+            f"(tolerance {led['tolerance']:,.2f})."
         )
-        if m["status"] == "available":
-            st.metric(label, text, help=m["basis"])
-        else:
-            st.warning(
-                f"{label}: not verified. Unverified value: {text}. " + " ".join(m["blockers"])
+    with st.expander("Account metrics from order and cash history"):
+        for m in perf["metrics"]:
+            if m["name"] == "money_weighted_return_xirr" and not show_xirr:
+                continue
+            label = pv.label_for(m["name"])
+            if m["status"] == "available":
+                st.metric(label, _metric_text(m), help=m["basis"])
+                if m.get("cross_check"):
+                    st.caption(m["cross_check"])
+                if m["name"] == "money_weighted_return_xirr":
+                    for w in (perf["xirr"] or {}).get("warnings", []):
+                        st.caption(w)
+            elif m["status"] == "partial":
+                shown = f" Unreconciled value: {_metric_text(m)}." if m.get("value") else ""
+                st.warning(f"{label}: not reconciled.{shown} " + " ".join(m["blockers"]))
+            else:
+                st.info(f"{label}: unavailable. " + " ".join(m["blockers"][:2]))
+    with st.expander("Data completeness"):
+        st.dataframe(
+            pd.DataFrame(
+                [
+                    {
+                        "Dataset": k["kind"],
+                        "Records": k["records"],
+                        "Earliest": (k["earliest_utc"] or "-")[:10],
+                        "Latest": (k["latest_utc"] or "-")[:10],
+                        "Checks passed": f"{sum(c['ok'] is True for c in k['checks'])}"
+                        f"/{len(k['checks'])}",
+                        "Types": ", ".join(f"{t} ({n})" for t, n in k["types"].items()),
+                    }
+                    for k in audit["kinds"]
+                ]
+            ),
+            width="stretch",
+            hide_index=True,
+        )
+        (st.success if audit["inception"]["ok"] else st.info)(audit["inception"]["detail"])
+    if hold["positions"]:
+        with st.expander("Position-by-position reconciliation"):
+            st.dataframe(
+                pd.DataFrame(hold["positions"])
+                .assign(reasons=lambda f: f["reasons"].map(" ".join))
+                .drop(columns=["reconstructed_cost", "broker_cost"]),
+                width="stretch",
+                hide_index=True,
             )
-    s = pd.DataFrame(val["series"])
-    if not s.empty:
-        s["date"] = pd.to_datetime(s["date"])
-        s = s.set_index("date")
-        st.markdown("**Portfolio value vs net invested capital**")
-        st.line_chart(s[["nav", "net_invested"]])
-        idx = s["twr_index"].dropna()
-        if not idx.empty:
-            st.markdown("**Time-weighted growth index** (restarts at 1.0 after any gap)")
-            st.line_chart(idx)
-            st.markdown("**Drawdown of the time-weighted index**")
-            st.area_chart(idx / idx.cummax() - 1.0)
-    for name, key in (("Monthly", "monthly"), ("Annual", "annual")):
-        rows = val[key]
-        if rows:
-            st.markdown(f"**{name} time-weighted return** (incomplete periods are marked)")
-            df = pd.DataFrame(rows).rename(
-                columns={"period": "Period", "twr": "TWR", "days": "Days", "complete": "Complete"}
-            )
-            st.dataframe(df.style.format({"TWR": "{:.2%}"}), width="stretch", hide_index=True)
-    with st.expander("Conventions"):
-        for k, v in val["conventions"].items():
-            st.markdown(f"- **{k.replace('_', ' ')}**: {v}")
+    if perf["external_flows"]:
+        with st.expander("External cash flows used (investor-signed)"):
+            st.dataframe(pd.DataFrame(perf["external_flows"]), width="stretch", hide_index=True)
 
 
 st.title("MarketOps")
@@ -496,42 +637,13 @@ with tab_act:
                         st.info(f"{label}: unavailable. " + " ".join(m["blockers"][:1]))
 
 # ---------------------------------------------------------------- historical performance
-_METRIC_LABELS = {
-    "total_external_deposits": "External deposits",
-    "total_external_withdrawals": "External withdrawals",
-    "net_invested_capital": "Net invested capital",
-    "dividends_received": "Dividends received",
-    "interest_received": "Interest received",
-    "account_fees": "Account fees",
-    "realised_pnl": "Realised P/L",
-    "unrealised_pnl": "Unrealised P/L (snapshot)",
-    "net_gain_on_invested_capital": "Net gain on invested capital",
-    "money_weighted_return_xirr": "Money-weighted return (XIRR)",
-    "time_weighted_return": "Time-weighted return",
-    "portfolio_equity_curve": "Portfolio equity curve",
-    "total_return_pct": "Total return %",
-    "benchmark_comparison": "Benchmark comparison",
-}
-
-
-def _metric_text(m: dict[str, Any]) -> str:
-    v = m.get("value") or {}
-    ccy = m.get("unit") or ""
-    if m["name"] == "money_weighted_return_xirr":
-        return f"{v['annualised_rate'] * 100:.2f}% per year"
-    parts = [
-        f"{k.replace('_', ' ')} {val:,.2f} {ccy}".strip() for k, val in v.items() if k != "count"
-    ]
-    return "; ".join(parts)
-
-
 with tab_perf:
     st.subheader("Historical performance")
     st.caption(
-        "Reconstructed from your stored order, cash and dividend history and checked against the "
-        "live Trading 212 positions and cash. Pressing the button makes read-only requests for "
-        "the current positions and cash balance. A figure appears only when its inputs reconcile; "
-        "otherwise the reason is shown. Deposits are never counted as profit."
+        "Daily portfolio value and returns rebuilt from your stored order, cash and dividend "
+        "history, valued at **historical closing prices**, and checked against a read-only "
+        "**live Trading 212 snapshot**. Deposits are never counted as profit; a figure is shown "
+        "as reconciled only when its inputs match the live account."
     )
     st.text_input(
         "Local access token (MARKETOPS_AGENT_API_TOKEN)",
@@ -540,119 +652,16 @@ with tab_perf:
         help="Held only in this browser session's server memory.",
     )
     tkp = "tok_perf" if st.session_state.get("tok_perf") else "tok_history"
-    if st.button("Calculate historical performance", type="primary"):
-        st.session_state.perf, st.session_state.perf_err = get(
-            "/performance/historical", token_key=tkp
-        )
-    if st.session_state.get("perf_err"):
-        st.error(f"Could not calculate: {st.session_state.perf_err}")
-    perf = st.session_state.get("perf")
-    if perf:
-        banner = {
-            "verified": st.success,
-            "partial": st.warning,
-            "unverified": st.warning,
-        }[perf["overall_status"]]
-        banner(
-            f"{perf['environment'].upper()} account, {perf['account_currency'] or '?'}: "
-            f"reconciliation status **{perf['overall_status']}** "
-            f"as of {perf['as_of_utc'][:19]} UTC."
-        )
-        for note in perf["notes"]:
-            st.caption(note)
-        st.markdown("**Data completeness**")
-        audit = perf["data_audit"]
-        st.dataframe(
-            pd.DataFrame(
-                [
-                    {
-                        "Dataset": k["kind"],
-                        "Records": k["records"],
-                        "Earliest": (k["earliest_utc"] or "-")[:10],
-                        "Latest": (k["latest_utc"] or "-")[:10],
-                        "Checks passed": f"{sum(c['ok'] is True for c in k['checks'])}"
-                        f"/{len(k['checks'])}",
-                        "Types": ", ".join(f"{t} ({n})" for t, n in k["types"].items()),
-                    }
-                    for k in audit["kinds"]
-                ]
-            ),
-            width="stretch",
-            hide_index=True,
-        )
-        for k in audit["kinds"]:
-            for c in k["checks"]:
-                if c["ok"] is not True:
-                    st.warning(f"{k['kind']} - {c['name'].replace('_', ' ')}: {c['detail']}")
-        for issue in audit["issues"]:
-            st.warning(issue)
-        (st.success if audit["inception"]["ok"] else st.info)(audit["inception"]["detail"])
-
-        st.markdown("**Reconciliation with the live account**")
-        hold, led = perf["holdings"], perf["cash_ledger"]
-        r1, r2 = st.columns(2)
-        r1.metric("Positions", hold["status"], f"{hold['matched']} of {hold['checked']} match")
-        r2.metric("Cash ledger", led["status"])
-        if hold["positions"]:
-            st.dataframe(
-                pd.DataFrame(hold["positions"])
-                .assign(reasons=lambda f: f["reasons"].map(" ".join))
-                .drop(columns=["reconstructed_cost", "broker_cost"]),
-                width="stretch",
-                hide_index=True,
-            )
-        for reason in led["reasons"]:
-            st.warning(reason)
-        if led["difference"] is not None:
-            st.caption(
-                f"Cash implied by history minus broker cash: {led['difference']:+,.2f} "
-                f"(tolerance {led['tolerance']:,.2f})."
-            )
-
-        st.markdown("**Metrics**")
-        for m in perf["metrics"]:
-            label = _METRIC_LABELS.get(m["name"], m["name"])
-            if m["status"] == "available":
-                st.metric(label, _metric_text(m), help=m["basis"])
-                if m.get("cross_check"):
-                    st.caption(m["cross_check"])
-                if m["name"] == "money_weighted_return_xirr":
-                    for w in (perf["xirr"] or {}).get("warnings", []):
-                        st.caption(w)
-            elif m["status"] == "partial":
-                shown = f" Unverified value: {_metric_text(m)}." if m.get("value") else ""
-                st.warning(f"{label}: not verified.{shown} " + " ".join(m["blockers"]))
-            else:
-                st.info(f"{label}: unavailable. " + " ".join(m["blockers"][:2]))
-
-        flows_ok = any(
-            m["name"] == "net_invested_capital" and m["status"] == "available"
-            for m in perf["metrics"]
-        )
-        if flows_ok and perf["net_invested_series"]:
-            st.markdown("**Net invested capital over time** (deposits minus withdrawals)")
-            series = pd.DataFrame(perf["net_invested_series"])
-            series["date"] = pd.to_datetime(series["date"])
-            st.line_chart(series.set_index("date")["net_invested"])
-        if perf["external_flows"]:
-            with st.expander("External cash flows used (investor-signed)"):
-                st.dataframe(pd.DataFrame(perf["external_flows"]), width="stretch", hide_index=True)
-
-    st.divider()
-    st.subheader("Historical valuation and time-weighted performance")
-    st.caption(
-        "Daily portfolio value from your reconstructed holdings and cash, public daily prices "
-        "(personal-use provider, cached locally) and ECB reference FX. A day is valued only when "
-        "every held instrument has a verified symbol, a recent close and any needed FX rate; "
-        "gaps are shown as gaps. Time-weighted return removes the effect of deposit timing and "
-        "is separate from the money-weighted XIRR above."
-    )
-    v1, v2 = st.columns(2)
-    if v1.button("Calculate historical valuation", type="primary"):
+    b1, b2, b3 = st.columns(3)
+    if b1.button("Calculate historical valuation", type="primary"):
         st.session_state.val, st.session_state.val_err = get(
             "/performance/valuation", token_key=tkp
         )
-    if v2.button("Download prices and FX (public data)"):
+    if b2.button("Calculate historical performance"):
+        st.session_state.perf, st.session_state.perf_err = get(
+            "/performance/historical", token_key=tkp
+        )
+    if b3.button("Download prices and FX (public data)"):
         st.session_state.val_refresh, st.session_state.val_refresh_err = post(
             "/performance/valuation/refresh", {}, token_key=tkp
         )
@@ -665,9 +674,21 @@ with tab_perf:
         )
     if st.session_state.get("val_err"):
         st.error(f"Could not calculate: {st.session_state.val_err}")
-    val = st.session_state.get("val")
+    if st.session_state.get("perf_err"):
+        st.error(f"Could not calculate: {st.session_state.perf_err}")
+    val, perf = st.session_state.get("val"), st.session_state.get("perf")
     if val:
-        _render_valuation(val)
+        _render_valuation(val, perf)
+    if perf:
+        st.divider()
+        _render_snapshot(perf, show_xirr=not val)
+    if not val and not perf:
+        st.info(
+            "Press “Calculate historical valuation” for portfolio value, returns and charts, and "
+            "“Calculate historical performance” for the live-account reconciliation and XIRR."
+        )
+    elif perf and not val:
+        st.info("Press “Calculate historical valuation” for portfolio value, returns and charts.")
 
 
 # ---------------------------------------------------------------- stock research

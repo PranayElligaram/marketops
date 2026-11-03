@@ -61,3 +61,22 @@ Otherwise metrics are `partial` with blockers, or `unavailable` with a reason.
 - Corporate actions other than provider-reported splits (mergers, spin-offs, ticker changes) are
   not interpreted.
 - The reconciliation compares a last close with a live price, so small differences are expected.
+
+## Dashboard presentation (Historical performance tab)
+
+Code: `app/perf_view.py` (formatting, labels, display-period filtering, Altair charts) and the tab in
+`app/dashboard.py`. Presentation only: every figure is taken from the API response; no calculation changed.
+
+- Eight headline KPIs in two rows: portfolio value, net invested capital, net investment gain, total and annualised
+  time-weighted return, money-weighted return (XIRR), annualised volatility, maximum drawdown. Each card names its
+  basis: **Historical closes** (daily closing prices and ECB FX from `/performance/valuation`) or **Live snapshot**
+  (XIRR, from `/performance/historical`, which ends at the broker-reported live value).
+- **TWR vs XIRR:** TWR removes the timing of your deposits and shows how the investments performed; XIRR is the
+  yearly rate on your actual dated cash flows. They answer different questions and need not match.
+- Period selector (1M, 3M, 6M, 1Y, ALL) only chooses which days are plotted. Cumulative TWR and drawdown are derived
+  from the API's time-weighted index over the full history before cropping, so KPIs and chart values never change
+  with the selection. Leading days before the first valuation are not plotted; gaps stay gaps.
+- Status wording: API `verified` is shown as **Reconciled**, `partial` as **Partially reconciled**, `unverified` as
+  **Not reconciled**. The API values and the validation rules are unchanged. Significant warnings (unvalued days,
+  unconfirmed symbols, reconciliation reasons, failed audit checks) stay visible; coverage, share-count
+  reconciliation, provider/mapping diagnostics and conventions are in expanders.

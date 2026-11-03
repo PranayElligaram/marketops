@@ -360,9 +360,9 @@ def test_dashboard_renders_valuation_metrics_and_charts(
     next(b for b in at.button if b.label == "Calculate historical valuation").click()
     at.run()
     assert not at.exception and not at.error
-    assert any("valuation status **verified**" in s.value for s in at.success)
+    assert any("reconciliation status **Reconciled**" in s.value for s in at.success)
     labels = {m.label for m in at.metric}
-    assert {"Portfolio value (NAV)", "Net invested capital", "Time-weighted return"} <= labels
+    assert {"Portfolio value", "Net investment gain", "Total time-weighted return"} <= labels
 
 
 def test_dashboard_shows_reasons_when_prices_are_missing(
@@ -379,7 +379,7 @@ def test_dashboard_shows_reasons_when_prices_are_missing(
     next(b for b in at.button if b.label == "Calculate historical valuation").click()
     at.run()
     assert not at.exception
-    assert not any("valuation status **verified**" in s.value for s in at.success)
+    assert not any("reconciliation status **Reconciled**" in s.value for s in at.success)
     assert any(
         "unverified" in w.value.lower() or "could not" in w.value.lower() for w in at.warning
     )
