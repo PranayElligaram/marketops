@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pandas as pd
 import pytest
 from streamlit.testing.v1 import AppTest
@@ -141,6 +142,23 @@ def test_money_and_percent_formatting_is_consistent() -> None:
 
 
 # ----------------------------------------------------------------- rendered dashboard
+@pytest.fixture(autouse=True)
+def _offline_api(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The dashboard gates on GET /health/ready; AppTest runs it in-process with no API.
+    Answer only that probe and fail every other call as the real client would offline."""
+
+    def fake_get(url: str, **_: Any) -> httpx.Response:
+        if url.endswith("/health/ready"):
+            return httpx.Response(200, json={"status": "ready"})
+        raise httpx.ConnectError("offline test: no API", request=httpx.Request("GET", url))
+
+    def fake_post(url: str, **_: Any) -> httpx.Response:
+        raise httpx.ConnectError("offline test: no API", request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(httpx, "get", fake_get)
+    monkeypatch.setattr(httpx, "post", fake_post)
+
+
 def _render(val: dict[str, Any] | None, perf: dict[str, Any] | None = None) -> AppTest:
     at = AppTest.from_file(DASHBOARD, default_timeout=60)
     if val is not None:
