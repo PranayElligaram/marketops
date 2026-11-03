@@ -1,20 +1,25 @@
 # MarketOps
 
-A local, privacy-first stock research and portfolio analytics application. It combines a read-only
-Trading 212 integration, a leakage-guarded ML research pipeline, a FastAPI service, a Streamlit
-dashboard and a local LLM research agent. It is a **research and engineering project, not
-investment advice and not production-ready.**
+A local, privacy-first stock research and portfolio analytics application. It reconstructs a brokerage
+account's history, values it daily in GBP, compares it with a contribution-matched S&P 500 benchmark, and
+pairs that with a leakage-guarded ML research pipeline and a local LLM research agent whose claims are
+checked against tool evidence. It is a **research and engineering project, not investment advice.**
 
-> **The ML model has no demonstrated predictive edge.** See [ML methodology and results](#ml-methodology-and-measured-results).
+> **The ML classifier has no demonstrated predictive edge** (held-out ROC-AUC 0.496). It is included as an
+> example of evaluating a model honestly, not as a trading strategy. See [ML results](#ai-and-ml-components).
 
-## Motivation
+![Historical performance, synthetic account](docs/images/dashboard-portfolio.png)
+![Portfolio vs S&P 500 benchmark, synthetic account](docs/images/dashboard-benchmark.png)
 
-Retail investors see holdings and a headline P/L, but rarely a reconciled answer to "how has my
-money actually performed, and how risky is it?". Answering that correctly needs verified cash flows,
-consistent currencies and honest handling of missing data. MarketOps explores that problem end to end,
-and also serves as a worked example of evaluating a forecasting model without fooling yourself.
-Guiding rules: fail closed rather than compute a wrong number; never fabricate data; keep private
-brokerage data on the user's machine.
+*Screenshots use the built-in synthetic account only; no real data appears in this repository.*
+
+## The problem
+
+Retail investors see holdings and a headline P/L, but rarely a reconciled answer to "how has my money
+performed, how does it compare with simply buying the index, and how risky was it?". Answering that
+correctly needs verified cash flows, consistent currencies, dated prices and honest handling of missing
+data. MarketOps works on that problem end to end. Guiding rules: fail closed rather than compute a wrong
+number; never fabricate or silently substitute data; keep private brokerage data on the user's machine.
 
 ## Architecture
 
@@ -22,73 +27,90 @@ brokerage data on the user's machine.
 flowchart TD
     User[Investor] --> UI[Streamlit dashboard]
     UI -->|local HTTP, token for private routes| API[FastAPI]
-    API --> Broker[Trading 212 adapter: two fixed GET calls]
-    API --> History[Account history sync: read-only]
-    API --> Perf[Reconstruction + XIRR]
-    API --> Inference[Model inference + SHAP]
-    API --> DB[(PostgreSQL)]
-    API --> Agent[Local Ollama research agent]
-    Market[Local OHLCV CSV cache] --> Training[Walk-forward training + backtest]
-    Training --> MLflow[MLflow tracking, local SQLite]
-    Training --> Artifacts[Versioned model artifacts]
-    Artifacts --> Inference
-    History --> DB
-    DB --> Perf
+    API --> Broker[Trading 212: fixed read-only GET calls]
+    API --> History[Account history sync]
+    History --> DB[(PostgreSQL)]
+    DB --> Recon[Holdings + cash reconstruction, XIRR]
+    DB --> Val[Daily NAV, TWR, drawdown]
+    Prices[Local price / SPY / ECB FX cache] --> Val
+    Val --> Bench[Contribution-matched SPY benchmark]
+    API --> Demo[Synthetic demo account]
+    Market[Local OHLCV cache] --> Training[Walk-forward training + backtest]
+    Training --> MLflow[MLflow] & Artifacts[Hash-checked model artifacts]
+    Artifacts --> Inference[Inference + SHAP]
+    API --> Inference
+    API --> Agent[Local Ollama agent + evidence verifier]
 ```
 
-## Technology stack
+Stack: Python 3.13, FastAPI, Pydantic, SQLAlchemy, PostgreSQL, Streamlit + Altair, scikit-learn, XGBoost, SHAP,
+MLflow, Ollama (local models only), Docker Compose, pytest, Ruff, strict Mypy, GitHub Actions. More detail:
+[docs/architecture.md](docs/architecture.md).
 
-Python 3.13, FastAPI, Pydantic, SQLAlchemy, PostgreSQL, Streamlit, scikit-learn, XGBoost, SHAP,
-MLflow, Ollama (local models only), Docker Compose, pytest, Ruff, strict Mypy, GitHub Actions.
+## Portfolio reconstruction and benchmark methodology
 
-## Implemented features
+1. **History.** Orders, cash transactions and dividends are read from Trading 212 (read-only) into PostgreSQL
+   idempotently, with completeness auditing.
+2. **Reconstruction.** Holdings and a cash ledger are replayed from executed fills and checked against the live
+   broker snapshot. Every figure is gated: it is shown as reconciled only when its inputs match; otherwise it is
+   partial, with blockers, or unavailable, with a reason.
+3. **Valuation.** Daily GBP net asset value from unadjusted closing prices (dividends counted once, as cash) and ECB
+   reference FX. Output: net invested capital, time-weighted return (TWR), volatility, drawdown, monthly/annual
+   returns, and a money-weighted return (XIRR). Details: [docs/valuation.md](docs/valuation.md).
+4. **Benchmark.** The same deposits and withdrawals are replayed into SPY (dividend-adjusted close as a total-return
+   proxy, converted to GBP with same-date ECB rates) at the close of the same day, or the next trading day. Both
+   sides are compared only on days with a portfolio value *and* a benchmark price, with the same flows, currency
+   and end-of-day timing. Shown: values, TWR, annualised return, maximum drawdown, closing-price XIRR and the
+   differences. If the data cannot support a like-for-like comparison, the exact reason is shown instead.
+   Details and limitations: [docs/benchmark-design.md](docs/benchmark-design.md).
 
-- **Market data:** validated, idempotent daily OHLCV cache for 10 US large caps plus SPY.
-- **ML research:** point-in-time features, purged expanding-window walk-forward CV, one held-out test period,
-  logistic regression vs XGBoost, SHAP, drift and data-quality monitoring, MLflow tracking.
-- **Backtesting:** signals at close, fills at next open, flat 10 bps one-way costs; compared with momentum,
-  equal-weight and SPY baselines.
-- **Portfolio analytics:** concentration, cash, currency and reconciliation of summary vs positions.
-- **Account history (read-only):** orders, cash transactions and dividends, stored idempotently in PostgreSQL
-  with completeness auditing.
-- **Performance reconstruction:** event-driven holdings and cash ledger from executed fills, reconciled to the
-  broker snapshot, plus a money-weighted return (XIRR) that is refused when its preconditions fail.
-- **Historical valuation:** daily GBP NAV from reconstructed holdings, cached public prices and ECB FX; net invested capital, time-weighted return, volatility, drawdown and period returns, each gated on reconciliation to the broker ([docs/valuation.md](docs/valuation.md)).
-- **Research agent:** a local Ollama model that calls bounded tools; its claims are checked against tool evidence.
-- **Security:** token-protected private routes, secret redaction, live-account double opt-in.
+TWR removes the timing of your deposits (how the investments performed); XIRR is the yearly rate on your actual
+dated flows (how your money performed). The dashboard explains both, and the benchmark XIRRs end at a closing
+price rather than a live balance so they are comparable with each other.
 
-Exact verified numbers and change history are in [docs/status.md](docs/status.md).
+## AI and ML components
 
-## ML methodology and measured results
+- **Research pipeline.** Target: positive 5-session forward return for 10 US large caps. Point-in-time features,
+  purged expanding-window walk-forward CV (2010-2021), one held-out test period (2022+), logistic regression vs
+  XGBoost, SHAP, drift and data-quality monitoring, MLflow tracking, hash/schema-checked model artifacts.
+- **Measured result.** Held-out (n = 12,040, base rate 54.9 %): **ROC-AUC 0.496** (date-block bootstrap 95 %
+  interval about 0.476 to 0.518); development AUC 0.514 did not hold out of sample; the model does not beat an
+  always-up baseline on log-loss or Brier score. In the 2022+ backtest (10 bps costs, 5-session rebalance) it
+  returned CAGR 14.4 % (Sharpe 0.92) against 17.3 % for equal-weight and 11.9 % for SPY, all inflated by survivorship
+  bias. **There is no evidence the model predicts returns and it must not be used to trade.**
+- **Backtest limits.** Today's large caps (survivorship bias), flat cost assumption, one history and one window.
+  An earlier reporting-window error was found and fixed ([docs/technical-audit.md](docs/technical-audit.md)).
 
-Target: whether the 5-session forward return is positive. Features are point-in-time; training uses purged
-expanding-window walk-forward CV (2010-2021); the 2022+ period is evaluated once as a held-out test.
+## LLM research agent
 
-| Measure (held-out test, n = 12,040) | Result |
-|---|---|
-| Base rate of positive 5-session return | 54.9 % |
-| ROC-AUC | 0.496 (date-block bootstrap 95 % interval about 0.476 to 0.518) |
-| Walk-forward development AUC | 0.514, which did not hold out of sample |
+A local Ollama model (`qwen3.5:4b`) answers questions by calling an allowlisted set of bounded, schema-validated
+tools (price summary, ML signal, model evaluation, backtest, SHAP, portfolio weights). There are no shell, network,
+SQL, filesystem or order tools. Output is schema-constrained, and every claim must cite evidence; a rule-based
+verifier rejects uncited claims, numbers not bound to the cited metric/subject/period/unit, comparisons not
+computed by code, advice or certainty language, and any claim of predictive edge. Rejected claims are shown, not
+hidden; failures fall back to a labelled template. Portfolio access is opt-in and weights-only. A 26-case
+deterministic regression set (not an LLM quality score) gates the verifier ([docs/agent-evaluation.md](docs/agent-evaluation.md)).
+Private portfolio data is never sent to an external LLM.
 
-The model does not beat an always-up baseline on log-loss or Brier score, and XGBoost did not beat logistic
-regression. In the 2022+ backtest (10 bps costs, 5-session rebalance, risk-free rate 0) the model returned
-a CAGR of 14.4 % (Sharpe 0.92), against 17.3 % (1.17) for equal-weight and 11.9 % (0.74) for SPY. **There is no
-evidence the model predicts returns.**
+## Quantitative evaluation
 
-## Backtest limitations and survivorship bias
+Walk-forward validation, a single untouched test window, block-bootstrap intervals, baselines (always-up, momentum,
+equal-weight, SPY) and an independent rebuild of the backtest from raw CSVs are documented in
+[docs/status.md](docs/status.md). Valuation and benchmark maths are tested against independent plain-float
+reference calculations (closed forms, hand-computed drawdowns, prefix/no-look-ahead and price-rescaling invariance).
 
-- The universe is today's large caps, so every strategy, including the baselines, is inflated by survivorship bias.
-- Costs are a flat assumption: no spread variation, market impact, taxes or FX costs; cash earns 0 %.
-- Results come from a single history and a single held-out window; they are not forward-looking.
-- An earlier reporting-window error was found and fixed during audit; see [docs/technical-audit.md](docs/technical-audit.md).
+## Security and privacy
 
-## Trading 212 read-only architecture
-
-The client issues only fixed `GET` requests (account summary, positions, and history pages). There is no code
-path for orders, transfers or any write. Live (real-money) access is refused unless both
-`MARKETOPS_T212_ENVIRONMENT=live` and `MARKETOPS_T212_ALLOW_LIVE=true` are set. Create the API key in Trading 212 with
-read scopes only. See [docs/trading212-setup.md](docs/trading212-setup.md) and
-[docs/historical-activity.md](docs/historical-activity.md).
+- `.env`, market data, model artifacts, MLflow stores and logs are git-ignored; only `.env.example` is committed.
+- Trading 212 access is two fixed read-only `GET` families (summary/positions and history pages). There is no code path
+  for orders, transfers or writes. Live (real-money) access needs both `MARKETOPS_T212_ENVIRONMENT=live` and
+  `MARKETOPS_T212_ALLOW_LIVE=true`. Use a key with read scopes only ([docs/trading212-setup.md](docs/trading212-setup.md)).
+- Private routes need a local token (`X-MarketOps-Token`, constant-time compare, minimum length, **403 when unset**).
+  The dashboard keeps the typed token in session memory only. Only the synthetic routes are public.
+- Account identifiers are stored as hashes; keys and tokens are redacted from logs and errors; broker-backed agent
+  questions are withheld from the audit table.
+- Downloaded market data (prices, SPY, FX) stays in the local git-ignored cache and is never redistributed. Only public
+  symbols and dates are sent to providers.
+- Never post real portfolio screenshots or API output.
 
 ## Local installation
 
@@ -101,7 +123,7 @@ docker compose up --build -d --wait
 
 Dashboard: `http://127.0.0.1:8503`. API docs: `http://127.0.0.1:8001/docs`.
 
-To run the research pipeline you must download price data yourself (it is not redistributed here):
+For the research pipeline you download price data yourself (not redistributed here):
 
 ```
 python -m marketops.data.cli ingest
@@ -109,16 +131,16 @@ python -m marketops.training.cli --mlflow
 python -m marketops.backtest.run
 ```
 
-Price data comes from an unofficial Yahoo chart endpoint for **personal research use only**; check the provider's
-terms before use. The `data/`, `artifacts/` and `mlruns/` directories are git-ignored.
+Price data comes from an unofficial Yahoo chart endpoint for **personal research use only**; check its terms.
 
 ## Synthetic demonstration mode
 
-No Trading 212 account is needed. Leave the Trading 212 variables blank, open the dashboard and choose
-**Synthetic example** then **Load portfolio**. This uses generated data only. The test suite also runs entirely on
-synthetic fixtures. (Screenshots are not yet included; any added later will come from synthetic data only.)
+No Trading 212 account or token is needed. Open the dashboard, go to **Historical performance** and press
+**Load synthetic demo** for a complete invented account (two years of deposits, trades, a withdrawal, US holidays)
+with the full benchmark comparison, served by the public `GET /performance/demo`. The **Portfolio** tab's
+*Synthetic example* shows the live-snapshot view. Everything runs on generated data.
 
-## Testing and reproducibility
+## Automated tests and CI
 
 ```
 python -m venv .venv && pip install -c constraints.txt -e ".[dev,train,ui,tracking]"
@@ -126,26 +148,24 @@ pytest -q
 ruff check . && ruff format --check . && mypy src api
 ```
 
-Dependencies are pinned in `constraints.txt` and CI checks installed versions. At the last recorded run:
-467 passed, 8 skipped (opt-in PostgreSQL integration tests, run separately via Docker), with Ruff and strict Mypy clean.
-GitHub Actions needs no secrets, broker account or local services.
+Dependencies are pinned in `constraints.txt`. Tests use deterministic synthetic fixtures only (history parsing,
+reconstruction, valuation, benchmark, ML, agent verifier, API authentication, Streamlit AppTest); PostgreSQL
+integration tests run opt-in in Docker (`scripts/run_integration_tests.sh`). GitHub Actions runs Ruff, format check,
+strict Mypy and pytest with no secrets, broker account or local services. The final recorded results are in
+[docs/status.md](docs/status.md).
 
-## Security and privacy design
+## Known limitations
 
-- `.env`, data, model artifacts, MLflow stores and logs are git-ignored; only `.env.example` is committed.
-- Real brokerage data requires a local token (`X-MarketOps-Token`); private routes return 401/403 without it.
-- The research agent talks only to a local Ollama host and receives portfolio weights, not amounts, and only if enabled.
-- Account identifiers are stored as a hash; keys are redacted from logs and errors.
-- Never post real portfolio screenshots or API output.
-
-## Limitations and future work
-
-- No demonstrated predictive skill; treat all model output as research noise.
-- Reconstruction cannot prove history reaches account opening; corporate actions are flagged, not applied.
-- No benchmark comparison yet; price data is a single free personal-use source; broker-reported corporate
-  actions make an instrument unvalued rather than being interpreted.
-- Beta broker API; schema changes cause the system to fail closed.
-- Local single-user design; no authentication beyond a shared token, no hosted deployment.
+- No demonstrated predictive skill; treat model output as research noise.
+- The benchmark is SPY (an ETF proxy: ~0.09 % expense ratio, tracking error), assumes zero costs and taxes, mixes
+  USD/GBP moves, and pairs same-date ECB and US closes. The portfolio holds a different risk mix, so a gap is not
+  evidence of skill.
+- Reconstruction cannot prove history reaches account opening; corporate actions are flagged, not applied; mergers,
+  spin-offs and ticker changes are not interpreted (a renamed symbol needs a local override).
+- Free personal-use price data with no second source; daily closes only.
+- Live Trading 212 history endpoints need the `history:*` read scopes; real-response shapes were validated only
+  against the OpenAPI schema and read-only live checks on one account.
+- Local single-user design; token auth only; no hosted deployment.
 
 ## Licence
 

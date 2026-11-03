@@ -305,6 +305,10 @@ def test_refresh_downloads_only_symbols_and_fx(
     live: Env, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     live.sync(full=True)
+    monkeypatch.setenv("MARKETOPS_MARKET_CACHE_DIR", str(tmp_path))
+    from marketops.config import get_settings
+
+    get_settings.cache_clear()
     seen: list[str] = []
 
     class FakeProvider:
@@ -313,6 +317,7 @@ def test_refresh_downloads_only_symbols_and_fx(
         def fetch_daily(self, symbol: str, start: date, end: date) -> pd.DataFrame:
             seen.append(symbol)
             f = bars(start, [10.0] * 5)
+            f["adj_close"] = 9.9
             f.attrs["currency"] = "USD"
             return f
 
@@ -326,8 +331,10 @@ def test_refresh_downloads_only_symbols_and_fx(
     monkeypatch.setattr("marketops.valuation.fx.httpx.Client", lambda **kw: FakeClient())
     r = live.client.post("/performance/valuation/refresh", headers=HDR)
     assert r.status_code == 200
-    assert seen == ["AAA"] and r.json()["AAA"].startswith("ok")
+    assert seen == ["AAA", "SPY"]  # public symbols only: the traded instrument and the benchmark
+    assert r.json()["AAA"].startswith("ok") and r.json()["SPY"].startswith("ok")
     assert r.json()["FX"].startswith("ok")
+    assert (tmp_path / "benchmarks" / "SPY.csv").exists()
 
 
 # ------------------------------------------------------------------ dashboard

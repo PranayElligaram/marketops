@@ -1,6 +1,7 @@
 # Historical valuation and time-weighted performance
 
-Code: `src/marketops/valuation/` (`symbols`, `fx`, `cache`, `nav`, `twr`, `report`, `service`),
+Code: `src/marketops/valuation/` (`symbols`, `fx`, `cache`, `nav`, `twr`, `report`, `service`, plus the benchmark modules described in
+[benchmark-design.md](benchmark-design.md)),
 routes in `api/routes/performance.py`, dashboard section "Historical valuation and time-weighted
 performance". The money-weighted XIRR in `/performance/historical` is a separate measure and is
 unchanged.
@@ -10,7 +11,13 @@ unchanged.
   drawdown, monthly/annual returns and a reconciliation to the live snapshot. Reads PostgreSQL and
   the local cache only; it never downloads market data.
 - `POST /performance/valuation/refresh`: downloads daily bars for every instrument ever traded
-  (only public symbols and dates are sent) and daily ECB reference FX (currency codes and dates).
+  (only public symbols and dates are sent), the SPY benchmark series and daily ECB reference FX
+  (currency codes and dates).
+- `GET /performance/demo` (public, no token): the same response built from an invented account, prices,
+  FX and a synthetic SPY stand-in (`marketops/demo.py`). No credentials, database or network are used.
+
+The response includes `benchmark`: the contribution-matched S&P 500 comparison (status, exact reasons
+when unavailable, compared series, metrics, source provenance, conventions and limitations).
 
 ## Data sources (free, personal research use)
 - Prices: the Yahoo chart endpoint already used for research (unofficial; personal use; not
@@ -32,7 +39,8 @@ override is supplied. GBX/GBp prices are divided by 100.
 ## Conventions
 - Event date is the UTC calendar date; valuation days are Monday to Friday; NAV is end-of-day.
 - Price: provider split-adjusted `close`, restated to the as-traded price for the day (x product
-  of later splits). `adj_close` is never used, so dividends are counted once, as cash received.
+  of later splits). `adj_close` is never used for the portfolio, so dividends are counted once, as
+  cash received. (The only exception is the SPY benchmark, which needs a total-return series.)
 - A close up to 5 calendar days old may be used (flagged stale), never across a split. FX uses the
   last published rate up to 5 days old. Null provider bars are dropped, not treated as zero.
 - Splits from the provider multiply the shares held on the ex-date. If Trading 212 itself reports
@@ -80,3 +88,14 @@ Code: `app/perf_view.py` (formatting, labels, display-period filtering, Altair c
   **Not reconciled**. The API values and the validation rules are unchanged. Significant warnings (unvalued days,
   unconfirmed symbols, reconciliation reasons, failed audit checks) stay visible; coverage, share-count
   reconciliation, provider/mapping diagnostics and conventions are in expanders.
+
+## Benchmark comparison in the dashboard
+The tab section "Portfolio vs S&P 500 benchmark" (below the portfolio charts) shows: twelve comparative KPI
+cards (time-weighted return, annualised return, maximum drawdown, closing-price XIRR for both sides and the
+differences, value versus the benchmark), a value chart (portfolio, benchmark, net invested capital), a
+cumulative-return chart and a drawdown chart, a 1M / 3M / 6M / 1Y / ALL display window, a plain-language
+explanation of XIRR versus time-weighted return, and an expander with data quality (source, rows used and
+dropped, download time, file fingerprint, window) and methodology/limitations. Headline KPIs always cover the
+full comparison window; the display window only crops the charts, and cumulative-return lines are rebased to
+the window start (an exact operation for chain-linked returns). If the comparison is unavailable, the exact
+reason is shown instead. **Load synthetic demo** fills the tab from `/performance/demo`.

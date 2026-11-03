@@ -160,6 +160,104 @@ def _valuation_details(val: dict[str, Any]) -> None:
             st.markdown(f"- **{k.replace('_', ' ')}**: {v}")
 
 
+def _benchmark_explainer(bench: dict[str, Any]) -> None:
+    with st.expander("How to read this comparison (XIRR vs time-weighted return)"):
+        st.markdown(
+            "- **The question answered:** if every pound you deposited had instead bought the "
+            "S&P 500 (via the SPY fund, dividends reinvested, priced in £) at the close of the "
+            "same day, and every withdrawal had sold it, what would that be worth today?\n"
+            "- **Time-weighted return (TWR)** removes the effect of when money went in or out. "
+            "It compares how the *investments* performed and is the fair test against an index.\n"
+            "- **XIRR** is the yearly rate on your actual dated deposits and withdrawals, so it "
+            "also reflects *when you chose to invest*. It can be far from the TWR when large "
+            "deposits arrive late.\n"
+            "- **Why the XIRR here differs from the live XIRR above:** the live figure ends at a "
+            "live broker balance. The benchmark can only be valued at a closing price, so both "
+            "XIRRs here use the same flows and end on the same last common close.\n"
+            "- **Drawdown** is the fall from the previous high; the one with the smaller "
+            "number was the smoother ride.\n"
+            "- A positive gap does not prove skill, and the portfolio may simply hold different "
+            "risks than the index."
+        )
+
+
+def _benchmark_details(bench: dict[str, Any]) -> None:
+    src = bench.get("source") or {}
+    with st.expander("Data quality and methodology"):
+        if src:
+            age = f"{src['age_days']} day(s) ago" if src.get("age_days") is not None else "unknown"
+            st.markdown(
+                f"- **Source:** {src['symbol']} via {src.get('provider') or 'unknown provider'}; "
+                f"{src['basis']}\n"
+                f"- **Benchmark days usable:** {src['rows_usable']} "
+                f"({src['first_day']} to {src['last_day']}); dropped for invalid price: "
+                f"{src['rows_dropped_invalid_price']}, for missing exchange rate: "
+                f"{src['rows_dropped_missing_fx']}\n"
+                f"- **Downloaded:** {src.get('retrieved_utc') or 'unknown'} ({age}); file "
+                f"fingerprint `{(src.get('sha256') or 'none (synthetic)')[:16]}`\n"
+                f"- **Comparison window:** {bench['window_start']} to {bench['window_end']}, "
+                f"{bench['common_days']} days with both a portfolio value and a benchmark price"
+            )
+        for k, v in bench["conventions"].items():
+            st.markdown(f"- **{k.replace('_', ' ')}**: {v}")
+        st.markdown("**Limitations**")
+        for lim in bench["limitations"]:
+            st.markdown(f"- {lim}")
+
+
+def _benchmark_section(val: dict[str, Any]) -> None:
+    st.divider()
+    st.subheader("Portfolio vs S&P 500 benchmark")
+    bench = val.get("benchmark")
+    if bench is None:
+        st.info("The benchmark comparison is not part of this response.")
+        return
+    if bench["status"] == "unavailable":
+        st.warning("**Comparison unavailable.** " + " ".join(bench["reasons"]))
+        st.caption(
+            "Use “Download prices, FX and S&P 500 data” after syncing history. Nothing is "
+            "estimated or substituted when data is missing."
+        )
+        with st.expander("Methodology and limitations"):
+            for lim in bench["limitations"]:
+                st.markdown(f"- {lim}")
+        return
+    if bench["status"] == "partial":
+        for r in bench["reasons"]:
+            st.warning(r)
+    st.caption(
+        "What the same deposits and withdrawals would be worth if every pound had gone into the "
+        "S&P 500 (SPY, dividends reinvested, in £) on the same day. "
+        f"Compared {bench['window_start']} to {bench['window_end']}, closing prices only. The "
+        "window starts on the first day both the portfolio and the benchmark have a price, so "
+        "portfolio figures here can differ slightly from the headline cards above."
+    )
+    for row in pv.build_comparison_kpis(bench):
+        for col, k in zip(st.columns(len(row)), row, strict=True):
+            with col.container(border=True):
+                st.metric(k.label, k.value, help=k.help or None)
+                st.caption(k.source + (f" · {k.note}" if k.note else ""))
+    frame = pv.comparison_frame(bench)
+    period = st.segmented_control("Period", pv.PERIODS, default="ALL", key="bench_period") or "ALL"
+    shown = pv.window_comparison(frame, period)
+    st.markdown("**Portfolio value, S&P 500 benchmark value and net invested capital**")
+    st.altair_chart(pv.comparison_value_chart(shown, bench["currency"]), width="stretch")
+    st.caption(
+        "The benchmark line is the same money invested in the S&P 500. Net invested capital is "
+        "identical for both. The period selector changes the display only; headline figures "
+        "above always cover the full comparison window."
+    )
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("**Cumulative return since the start of the displayed period**")
+        st.altair_chart(pv.comparison_twr_chart(shown), width="stretch")
+    with c2:
+        st.markdown("**Drawdown from previous peak**")
+        st.altair_chart(pv.comparison_drawdown_chart(shown), width="stretch")
+    _benchmark_explainer(bench)
+    _benchmark_details(bench)
+
+
 def _render_valuation(val: dict[str, Any], perf: dict[str, Any] | None = None) -> None:
     status, cov = val["overall_status"], val["coverage"]
     banner = {"verified": st.success, "partial": st.warning, "unavailable": st.info}[status]
@@ -173,6 +271,10 @@ def _render_valuation(val: dict[str, Any], perf: dict[str, Any] | None = None) -
         "Values use end-of-day closing prices and ECB reference exchange rates, so they can differ "
         "from the live Trading 212 snapshot, which uses current broker prices."
     )
+    if any(n.startswith("SYNTHETIC") for n in val["notes"]):
+        st.warning(
+            "**Synthetic demonstration.** Every figure below is invented; no real account is read."
+        )
     for code, n in cov["unvalued_reasons"].items():
         st.warning(f"{n} weekday(s) not valued: {code.replace('_', ' ')}.")
     for m in val["mapping"]:
@@ -190,6 +292,7 @@ def _render_valuation(val: dict[str, Any], perf: dict[str, Any] | None = None) -
     for note in val["notes"]:
         st.caption(note)
     _charts(val)
+    _benchmark_section(val)
     _period_tables(val)
     _valuation_details(val)
 
@@ -652,7 +755,7 @@ with tab_perf:
         help="Held only in this browser session's server memory.",
     )
     tkp = "tok_perf" if st.session_state.get("tok_perf") else "tok_history"
-    b1, b2, b3 = st.columns(3)
+    b1, b2, b3, b4 = st.columns(4)
     if b1.button("Calculate historical valuation", type="primary"):
         st.session_state.val, st.session_state.val_err = get(
             "/performance/valuation", token_key=tkp
@@ -661,7 +764,10 @@ with tab_perf:
         st.session_state.perf, st.session_state.perf_err = get(
             "/performance/historical", token_key=tkp
         )
-    if b3.button("Download prices and FX (public data)"):
+    if b4.button("Load synthetic demo"):
+        st.session_state.val, st.session_state.val_err = get("/performance/demo")
+        st.session_state.perf = st.session_state.perf_err = None
+    if b3.button("Download prices, FX and S&P 500 data"):
         st.session_state.val_refresh, st.session_state.val_refresh_err = post(
             "/performance/valuation/refresh", {}, token_key=tkp
         )

@@ -18,6 +18,8 @@ from marketops.persistence.models import (
 )
 from marketops.portfolio.analytics import PortfolioOverview
 from marketops.valuation import fx as fxmod
+from marketops.valuation.benchmark_data import SYMBOL as BENCH_SYMBOL
+from marketops.valuation.benchmark_data import fetch_benchmark, load_benchmark
 from marketops.valuation.cache import fetch_symbol, load_series
 from marketops.valuation.report import HistoricalValuation, build_valuation
 from marketops.valuation.symbols import candidate_symbol, load_overrides, normalise_currency
@@ -46,6 +48,7 @@ def compute_valuation(
     # cash ledger that reproduces the broker balance; share counts are checked by the valuation.
     flows = next((m for m in perf.metrics if m.name == "total_external_deposits"), None)
     history_verified = flows is not None and flows.status == "available"
+    fx_table = fxmod.load_cached(cache_dir)
     return build_valuation(
         fills=fills,
         tx=tx,
@@ -53,7 +56,7 @@ def compute_valuation(
         ccy=ccy,
         as_of=as_of,
         price_root=cache_dir / "prices",
-        fx=fxmod.load_cached(cache_dir),
+        fx=fx_table,
         overrides=load_overrides(cache_dir / OVERRIDES_FILE),
         history_verified=history_verified,
         ledger_cash=perf.cash_ledger.reconstructed_cash,
@@ -64,6 +67,7 @@ def compute_valuation(
             if snapshot
             else None
         ),
+        benchmark=load_benchmark(cache_dir, fx_table, ccy),
     )
 
 
@@ -92,8 +96,12 @@ def refresh_market_data(
     for f in trades:
         if candidate_symbol(f["ticker"], overrides).symbol is None:
             result[f["ticker"]] = "unmapped: add an override"
+    if trades:
+        first_trade = min(f["occurred_at"].date() for f in trades)
+        result[BENCH_SYMBOL] = fetch_benchmark(cache_dir, provider, first_trade, today)
     ccys = {c for c in (_major(f.get("instrument_currency")) for f in trades) if c}
     ccys |= {c for c in (_major(f.get("wallet_currency")) for f in trades) if c}
+    ccys.add("USD")  # benchmark quote currency
     for sym in first:
         s = load_series(cache_dir / "prices", sym)
         if s and (c := _major(s.currency)):

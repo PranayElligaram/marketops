@@ -332,3 +332,207 @@ def twr_chart(df: pd.DataFrame, height: int = 260) -> alt.TopLevelMixin:
 
 def drawdown_chart(df: pd.DataFrame, height: int = 200) -> alt.TopLevelMixin:
     return _pct_chart(df, "drawdown", "Drawdown", "#c0392b", True, height)
+
+
+# ------------------------------------------------------------------ benchmark comparison
+BENCH = "S&P 500 benchmark"
+PORT = "Portfolio"
+NETINV = "Net invested capital"
+CMP_COLOURS = {PORT: "#2a6df4", BENCH: "#e0892b", NETINV: "#9aa3b2"}
+
+
+def pp(value: float) -> str:
+    """Percentage-point difference, e.g. +7.74 pp."""
+    return f"{value * 100:+.2f} pp"
+
+
+def _cmp_format(name: str, value: float, ccy: str | None) -> str:
+    if name == "value_difference":
+        return ("+" if value > 0 else "") + money(value, ccy)
+    if name.endswith("_value") or name == "net_invested_capital":
+        return money(value, ccy)
+    if name.endswith("_difference"):
+        return pp(value) + (" / yr" if name in ("annualised_difference", "xirr_difference") else "")
+    if "xirr" in name or "annualised" in name:
+        return f"{value:+.2%} / yr"
+    if name.endswith("drawdown"):
+        return pct(value)
+    return pct(value, signed=True)
+
+
+CMP_LABELS = {
+    "portfolio_twr": "Portfolio return (TWR)",
+    "benchmark_twr": "S&P 500 return (TWR)",
+    "twr_difference": "Portfolio vs S&P 500",
+    "value_difference": "Value vs S&P 500",
+    "portfolio_annualised_twr": "Portfolio annualised",
+    "benchmark_annualised_twr": "S&P 500 annualised",
+    "annualised_difference": "Annualised difference",
+    "portfolio_max_drawdown": "Portfolio max drawdown",
+    "benchmark_max_drawdown": "S&P 500 max drawdown",
+    "drawdown_difference": "Drawdown difference",
+    "portfolio_xirr_closing": "Portfolio XIRR (to last close)",
+    "benchmark_xirr_closing": "S&P 500 XIRR (same flows)",
+    "xirr_difference": "XIRR difference",
+    "benchmark_value": "Same money in the S&P 500",
+    "portfolio_value": "Portfolio value",
+    "net_invested_capital": NETINV,
+}
+CMP_HELP = {
+    "twr_difference": "Portfolio time-weighted return minus the benchmark, in percentage points.",
+    "value_difference": "Portfolio value minus what the same deposits and withdrawals would be "
+    "worth in the benchmark today. Positive = ahead of the benchmark.",
+    "benchmark_value": "Every deposit bought, and every withdrawal sold, in the benchmark at the "
+    "close of the same day.",
+    "portfolio_xirr_closing": "XIRR on your dated flows ending at the last common closing value. "
+    "It is not the live-snapshot XIRR above, which ends at a live balance.",
+    "drawdown_difference": "Portfolio minus benchmark maximum drawdown; negative means the "
+    "portfolio fell further.",
+}
+CMP_ROWS: tuple[tuple[str, ...], ...] = (
+    ("portfolio_twr", "benchmark_twr", "twr_difference", "value_difference"),
+    (
+        "portfolio_annualised_twr",
+        "benchmark_annualised_twr",
+        "portfolio_max_drawdown",
+        "benchmark_max_drawdown",
+    ),
+    ("portfolio_xirr_closing", "benchmark_xirr_closing", "xirr_difference", "benchmark_value"),
+)
+CMP_COLUMNS = [
+    "date",
+    "portfolio_value",
+    "benchmark_value",
+    "net_invested",
+    "portfolio_twr",
+    "benchmark_twr",
+    "portfolio_drawdown",
+    "benchmark_drawdown",
+]
+
+
+def build_comparison_kpis(bench: dict[str, Any]) -> list[list[Kpi]]:
+    """Comparative KPI rows from the API's benchmark block. Nothing is computed here."""
+    ccy = bench.get("currency")
+    by_name = {m["name"]: m for m in bench.get("metrics", [])}
+    rows: list[list[Kpi]] = []
+    for names in CMP_ROWS:
+        row: list[Kpi] = []
+        for name in names:
+            label, help_ = CMP_LABELS[name], CMP_HELP.get(name, "")
+            m = by_name.get(name)
+            if m is None or m["value"] is None:
+                why = ((m or {}).get("blockers") or ["Not available."])[0]
+                row.append(Kpi(name, label, "—", "unavailable", "Benchmark comparison", why, help_))
+                continue
+            ok = m["status"] == "available"
+            row.append(
+                Kpi(
+                    name,
+                    label,
+                    _cmp_format(name, m["value"], ccy),
+                    "ok" if ok else "unreconciled",
+                    "Benchmark comparison",
+                    "" if ok else "Portfolio not reconciled.",
+                    help_,
+                )
+            )
+        rows.append(row)
+    return rows
+
+
+def comparison_frame(bench: dict[str, Any]) -> pd.DataFrame:
+    df = pd.DataFrame(bench.get("series", []), columns=CMP_COLUMNS)
+    df["date"] = pd.to_datetime(df["date"])
+    return df
+
+
+def window_comparison(df: pd.DataFrame, period: str) -> pd.DataFrame:
+    """Display window with cumulative returns rebased to 0 at the window start.
+
+    Rebasing (1+r_t)/(1+r_0)-1 is exact for chain-linked returns, so a window figure equals the
+    return of that window. Drawdowns stay as measured from the full-history peak.
+    """
+    shown = filter_period(df, period)
+    if shown.empty:
+        return shown
+    shown = shown.copy()
+    for col in ("portfolio_twr", "benchmark_twr"):
+        shown[col] = (1.0 + shown[col]) / (1.0 + shown[col].iloc[0]) - 1.0
+    return shown
+
+
+def _line_chart(
+    wide: pd.DataFrame,
+    domain: list[str],
+    y: alt.Y,
+    tip_fmt: str,
+    dashes: list[list[int]],
+    height: int,
+) -> alt.TopLevelMixin:
+    long = wide.melt(id_vars="date", var_name="series", value_name="value")
+    colour = alt.Color(
+        "series:N",
+        scale=alt.Scale(domain=domain, range=[CMP_COLOURS[d] for d in domain]),
+        legend=alt.Legend(title=None, orient="top"),
+    )
+    lines = (
+        alt.Chart(long)
+        .mark_line(strokeWidth=2)
+        .encode(
+            x=alt.X("date:T", title=None, axis=alt.Axis(format="%b %Y", labelOverlap=True)),
+            y=y,
+            color=colour,
+            strokeDash=alt.StrokeDash(
+                "series:N", scale=alt.Scale(domain=domain, range=dashes), legend=None
+            ),
+        )
+    )
+    tips = [alt.Tooltip("date:T", title="Date", format="%d %b %Y")] + [
+        alt.Tooltip(f"{n}:Q", format=tip_fmt) for n in domain
+    ]
+    return alt.layer(lines, *_hover(wide, f"{domain[0]}:Q", tips)).properties(height=height)
+
+
+def comparison_value_chart(
+    df: pd.DataFrame, ccy: str | None, height: int = 340
+) -> alt.TopLevelMixin:
+    names = {"portfolio_value": PORT, "benchmark_value": BENCH, "net_invested": NETINV}
+    y = alt.Y(
+        "value:Q",
+        title=f"Value ({ccy})" if ccy else "Value",
+        scale=alt.Scale(zero=False),
+        axis=alt.Axis(labelExpr=_axis_labels(ccy)),
+    )
+    return _line_chart(
+        df[["date", *names]].rename(columns=names),
+        [PORT, BENCH, NETINV],
+        y,
+        f"{symbol_for(ccy)},.2f",
+        [[1, 0], [1, 0], [5, 3]],
+        height,
+    )
+
+
+def _pct_two(
+    df: pd.DataFrame, cols: tuple[str, str], title: str, fmt: str, height: int
+) -> alt.TopLevelMixin:
+    wide = df[["date", *cols]].rename(columns={cols[0]: PORT, cols[1]: BENCH})
+    y = alt.Y("value:Q", title=title, axis=alt.Axis(format="%"), scale=alt.Scale(zero=False))
+    return _line_chart(wide, [PORT, BENCH], y, fmt, [[1, 0], [1, 0]], height)
+
+
+def comparison_twr_chart(df: pd.DataFrame, height: int = 260) -> alt.TopLevelMixin:
+    return _pct_two(
+        df, ("portfolio_twr", "benchmark_twr"), "Return since window start", "+.2%", height
+    )
+
+
+def comparison_drawdown_chart(df: pd.DataFrame, height: int = 220) -> alt.TopLevelMixin:
+    return _pct_two(
+        df,
+        ("portfolio_drawdown", "benchmark_drawdown"),
+        "Drawdown from previous peak",
+        ".2%",
+        height,
+    )

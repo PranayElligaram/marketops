@@ -19,6 +19,12 @@ from pydantic import BaseModel
 from marketops.performance.holdings import QTY_TOLERANCE
 from marketops.valuation import twr
 from marketops.valuation.cache import load_series
+from marketops.valuation.comparison import (
+    BenchmarkComparison,
+    BenchmarkInput,
+    PortfolioDay,
+    compare,
+)
 from marketops.valuation.fx import FxTable
 from marketops.valuation.nav import DayNav, PriceSeries, build_events, compute_daily_nav
 from marketops.valuation.symbols import (
@@ -44,6 +50,8 @@ CONVENTIONS: dict[str, str] = {
     "twr_flows": "External flows occur after the close of their day (sensitivity vs start of day "
     "is reported).",
     "dividends": "Counted only as cash received; prices are not dividend-adjusted.",
+    "benchmark_exception": "Only the S&P 500 benchmark (SPY) uses dividend-adjusted prices, "
+    "as a total-return proxy.",
 }
 
 
@@ -119,6 +127,7 @@ class HistoricalValuation(BaseModel):
     metrics: list[ValMetric]
     reconciliation: NavReconciliation
     notes: list[str]
+    benchmark: BenchmarkComparison | None = None
 
 
 def _f(v: Decimal | None) -> float | None:
@@ -152,6 +161,7 @@ def build_valuation(
     broker_values: Mapping[str, float] | None,
     broker_total: float | None,
     series_override: Mapping[str, PriceSeries] | None = None,
+    benchmark: BenchmarkInput | None = None,
 ) -> HistoricalValuation:
     notes: list[str] = []
     empty_cov = Coverage(
@@ -244,6 +254,7 @@ def build_valuation(
         broker_total,
         fx,
         notes,
+        benchmark,
     )
 
 
@@ -260,6 +271,7 @@ def _assemble(
     broker_total: float | None,
     fx: FxTable | None,
     notes: list[str],
+    benchmark: BenchmarkInput | None = None,
 ) -> HistoricalValuation:
     valued = [d for d in days if d.nav is not None]
     reasons = Counter(_reason_code(r) for d in days if d.nav is None for r in d.reasons)
@@ -486,6 +498,15 @@ def _assemble(
         metrics=metrics,
         reconciliation=recon,
         notes=notes,
+        benchmark=compare(
+            [PortfolioDay(d.day, d.nav, d.flow, d.net_invested) for d in days],
+            benchmark,
+            ccy,
+            overall == "verified",
+            blockers,
+        )
+        if benchmark is not None
+        else None,
     )
 
 
