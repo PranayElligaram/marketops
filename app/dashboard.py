@@ -865,6 +865,46 @@ with tab_stock:
         if st.session_state.get("technical_error"):
             st.warning("Technical screen unavailable: " + st.session_state.technical_error)
 
+        if st.button("Evaluate historical position strategy"):
+            st.session_state.position_strategy, st.session_state.strategy_error = get(
+                f"/research/position-strategy/{sym}"
+            )
+        strategy = st.session_state.get("position_strategy")
+        if strategy and strategy.get("symbol") == sym:
+            st.caption(
+                "Fixed 10–60-session holding rules, next-session open execution and "
+                "a 10 bps one-way cost assumption. No strategy parameters were tuned "
+                "on the held-out ML test."
+            )
+            if strategy["status"] != "available":
+                st.info(strategy["reason"])
+            else:
+                a, b = st.columns(2)
+                a.metric(
+                    "Rule strategy historical CAGR",
+                    f"{strategy['strategy']['cagr']:+.2%}"
+                    if strategy["strategy"].get("cagr") is not None
+                    else "Unavailable",
+                )
+                b.metric(
+                    "Matched buy-and-hold CAGR",
+                    f"{strategy['buy_and_hold']['cagr']:+.2%}"
+                    if strategy["buy_and_hold"].get("cagr") is not None
+                    else "Unavailable",
+                )
+                st.caption(
+                    f"Common window: {strategy['window_start']} to {strategy['window_end']}."
+                )
+                st.dataframe(
+                    pd.DataFrame(strategy["signals"]),
+                    hide_index=True,
+                    width="stretch",
+                )
+            for assumption in strategy["assumptions"]:
+                st.caption(assumption)
+        if st.session_state.get("strategy_error"):
+            st.warning("Historical strategy unavailable: " + st.session_state.strategy_error)
+
         with st.expander("Hypothetical position risk budget (GBP)"):
             st.caption(
                 "Manual scenario only. No brokerage values are loaded, stored or sent to the API. "
