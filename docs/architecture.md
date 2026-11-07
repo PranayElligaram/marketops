@@ -18,6 +18,9 @@ flowchart TD
     Artifacts --> Inference[Inference + SHAP]
     API --> Inference
     API --> Agent[Local Ollama agent + evidence verifier]
+    API --> Decision[Deterministic technical review + 2–12-week backtest]
+    API --> Journal[Private manual hypothetical research journal]
+    Journal --> DB
     Inference --> Agent
 ```
 
