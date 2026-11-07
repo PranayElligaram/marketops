@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+
+import pandas as pd
 from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
 from api.routes.research import market_history
+from marketops.decision.strategy import evaluate_position_strategy
 from marketops.decision.technical import DailyBar, screen_daily_bars
 
 router = APIRouter(tags=["research"])
@@ -39,4 +42,21 @@ def technical_screen(symbol: str) -> dict[str, Any]:
         "terms": history.terms,
         **asdict(result),
         "as_of": result.as_of.isoformat() if result.as_of is not None else None,
+    }
+
+
+@router.get("/research/position-strategy/{symbol}")
+def position_strategy(symbol: str) -> dict[str, Any]:
+    """Historical fixed-rule medium-term research only; neither advice nor an order."""
+    history = market_history(symbol, days=4000)
+    frame = pd.DataFrame([bar.model_dump() for bar in history.rows])
+    try:
+        report = evaluate_position_strategy(frame, history.symbol)
+    except ValueError:
+        raise HTTPException(502, "Cached historical data cannot support a valid backtest.") from None
+    return {
+        **report,
+        "provider": history.provider,
+        "price_convention": history.price_convention,
+        "terms": history.terms,
     }
