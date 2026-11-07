@@ -173,11 +173,11 @@ def evaluate_position_strategy(
     base["window_end"] = str(actual.equity.index[-1].date())
     base["trades"] = [
         {
-            "date": str(row.date.date()),
-            "symbol": row.symbol,
-            "delta_weight": float(row.delta_weight),
-            "cost_fraction": float(row.cost),
+            "date": str(pd.Timestamp(row["date"]).date()),
+            "symbol": str(row["symbol"]),
+            "delta_weight": float(row["delta_weight"]),
+            "cost_fraction": float(row["cost"]),
         }
-        for row in actual.trades.itertuples(index=False)
+        for row in actual.trades.to_dict("records")
     ]
     return base
