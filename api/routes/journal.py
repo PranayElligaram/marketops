@@ -98,7 +98,7 @@ def _entry(row: dict[str, object]) -> JournalEntry:
         if price is not None
         else None
     )
-    return JournalEntry(**row, hypothetical_gross_pnl_gbp=pnl)
+    return JournalEntry.model_validate({**row, "hypothetical_gross_pnl_gbp": pnl})
 
 
 @router.post("/ideas", response_model=JournalEntry, status_code=201)
@@ -114,7 +114,10 @@ def create_idea(idea: NewIdea) -> JournalEntry:
     try:
         with engine.begin() as connection:
             result = connection.execute(insert(research_journal).values(**values))
-            key = result.inserted_primary_key[0]
+            primary_key = result.inserted_primary_key
+            if not primary_key:
+                raise HTTPException(503, "Local journal insert did not return an identifier.")
+            key = primary_key[0]
             row = (
                 connection.execute(select(research_journal).where(research_journal.c.id == key))
                 .mappings()
