@@ -1,6 +1,7 @@
 """MarketOps dashboard: read-only portfolio view plus ML research results from the API."""
 
 import os
+from datetime import date
 from typing import Any
 
 import httpx
@@ -26,7 +27,7 @@ def post(
     try:
         headers = _private_headers(token_key)
         r = httpx.post(f"{API}{path}", json=body, headers=headers, timeout=timeout)
-        if r.status_code not in (200, 202):
+        if r.status_code not in (200, 201, 202):
             try:
                 return None, r.json().get("detail", f"HTTP {r.status_code}")
             except ValueError:
@@ -391,7 +392,7 @@ if err:
     st.error(f"API or PostgreSQL not ready: {err}")
     st.stop()
 
-tab_port, tab_act, tab_perf, tab_stock, tab_agent, tab_model, tab_bt = st.tabs(
+tab_port, tab_act, tab_perf, tab_stock, tab_agent, tab_model, tab_bt, tab_journal = st.tabs(
     [
         "Portfolio",
         "Portfolio activity",
@@ -400,6 +401,7 @@ tab_port, tab_act, tab_perf, tab_stock, tab_agent, tab_model, tab_bt = st.tabs(
         "AI research agent",
         "Model performance",
         "Backtests",
+        "Research journal",
     ]
 )
 
@@ -837,6 +839,136 @@ with tab_stock:
             st.caption(an["disclaimer"])
             st.dataframe(pd.Series(an["features"], name="value"), width="stretch")
 
+        st.divider()
+        st.subheader("2–12 week technical research")
+        st.caption(
+            "Rule-based historical screen, not a forecast or an order recommendation. "
+            "Uses cached prices only; stale or insufficient data returns unavailable."
+        )
+        if st.button("Evaluate technical conditions"):
+            st.session_state.technical_screen, st.session_state.technical_error = get(
+                f"/research/technical/{sym}"
+            )
+        technical = st.session_state.get("technical_screen")
+        if technical and technical.get("symbol") == sym:
+            st.caption(
+                f"Data through {technical.get('as_of') or 'unknown'}; "
+                f"source: {technical.get('provider') or 'unknown'}"
+            )
+            if technical["state"] == "unavailable":
+                st.warning("; ".join(technical["rationale"]))
+            else:
+                st.info(f"Condition: {technical['state'].replace('_', ' ')}")
+                for reason in technical["rationale"]:
+                    st.caption(reason)
+                st.caption(technical["limitation"])
+        if st.session_state.get("technical_error"):
+            st.warning("Technical screen unavailable: " + st.session_state.technical_error)
+
+        if st.button("Evaluate historical position strategy"):
+            st.session_state.position_strategy, st.session_state.strategy_error = get(
+                f"/research/position-strategy/{sym}"
+            )
+        strategy = st.session_state.get("position_strategy")
+        if strategy and strategy.get("symbol") == sym:
+            st.caption(
+                "Fixed 10–60-session holding rules, next-session open execution and "
+                "a 10 bps one-way cost assumption. No strategy parameters were tuned "
+                "on the held-out ML test."
+            )
+            if strategy["status"] != "available":
+                st.info(strategy["reason"])
+            else:
+                a, b = st.columns(2)
+                a.metric(
+                    "Rule strategy historical CAGR",
+                    f"{strategy['strategy']['cagr']:+.2%}"
+                    if strategy["strategy"].get("cagr") is not None
+                    else "Unavailable",
+                )
+                b.metric(
+                    "Matched buy-and-hold CAGR",
+                    f"{strategy['buy_and_hold']['cagr']:+.2%}"
+                    if strategy["buy_and_hold"].get("cagr") is not None
+                    else "Unavailable",
+                )
+                st.caption(
+                    f"Common window: {strategy['window_start']} to {strategy['window_end']}."
+                )
+                st.dataframe(
+                    pd.DataFrame(strategy["signals"]),
+                    hide_index=True,
+                    width="stretch",
+                )
+            for assumption in strategy["assumptions"]:
+                st.caption(assumption)
+        if st.session_state.get("strategy_error"):
+            st.warning("Historical strategy unavailable: " + st.session_state.strategy_error)
+
+        with st.expander("Hypothetical position risk budget (GBP)"):
+            st.caption(
+                "Uses a previously loaded GBP portfolio snapshot when available, otherwise "
+                "manual scenario inputs. No extra broker call, API submission, trade or target."
+            )
+            previous_pf = st.session_state.get("portfolio")
+            starting_value = 10000.0
+            starting_exposure = 0.0
+            matched_holding = False
+            if previous_pf and previous_pf.get("account_currency") == "GBP":
+                verified_total = previous_pf.get("portfolio_value_incl_cash")
+                if verified_total is not None and float(verified_total) > 0:
+                    starting_value = float(verified_total)
+                    found = [
+                        h
+                        for h in previous_pf.get("holdings", [])
+                        if str(h.get("ticker", "")).upper() == sym
+                    ]
+                    if found:
+                        starting_exposure = sum(float(h["current_value"]) for h in found)
+                        matched_holding = True
+                    st.caption(
+                        "Pre-filled from the last loaded portfolio snapshot, which may be stale. "
+                        + (
+                            "Existing symbol exposure matched exactly."
+                            if matched_holding
+                            else "No exact symbol match: verify existing exposure manually."
+                        )
+                    )
+            scenario_value = st.number_input(
+                "Hypothetical portfolio value (£)",
+                min_value=1.0,
+                value=starting_value,
+                step=500.0,
+            )
+            scenario_exposure = st.number_input(
+                "Existing exposure to this position (£)",
+                min_value=0.0,
+                value=min(starting_exposure, float(scenario_value)),
+                max_value=float(scenario_value),
+                step=100.0,
+            )
+            scenario_risk = st.slider("Loss budget (% of portfolio)", 0.1, 5.0, 1.0, 0.1)
+            scenario_cap = st.slider("Position cap (%)", 1.0, 25.0, 10.0, 1.0)
+            scenario_stop = st.slider("Hypothetical stop distance (%)", 1.0, 50.0, 8.0, 1.0)
+            from marketops.decision.technical import size_risk_scenario
+
+            example = size_risk_scenario(
+                scenario_value,
+                scenario_exposure,
+                loss_budget_pct=scenario_risk,
+                position_cap_pct=scenario_cap,
+                stop_distance_pct=scenario_stop,
+            )
+            st.metric(
+                "Illustrative maximum additional notional",
+                f"£{example.maximum_additional_notional_gbp:,.2f}",
+            )
+            st.caption(
+                f"Binding limit: {example.binding_limit}; "
+                f"hypothetical loss budget: £{example.risk_budget_gbp:,.2f}."
+            )
+            st.warning(example.limitation)
+
 # ---------------------------------------------------------------- research agent
 with tab_agent:
     st.caption(
@@ -1033,3 +1165,108 @@ with tab_bt:
         for a in bt["assumptions"]:
             st.caption(a)
         st.caption("Model strategy parameters were not tuned on the test period.")
+
+
+# -------------------------------------------------------------- manual research journal
+with tab_journal:
+    st.subheader("Hypothetical research journal")
+    st.caption(
+        "Manual research records only. Nothing here places an order or confirms that a trade "
+        "executed. Backdated records are marked retrospective. Hypothetical P/L is gross "
+        "and excludes costs, taxes and FX."
+    )
+    st.text_input(
+        "Local journal access token",
+        type="password",
+        key="tok_journal",
+        help="Private local API token. Never included in a repository or an LLM request.",
+    )
+    with st.form("journal_idea"):
+        symbol_j = st.text_input("Ticker", value="AAPL", max_chars=20)
+        decision_j = st.date_input("Date of research decision", value=date.today())
+        thesis_j = st.text_area("Research thesis (historical evidence and assumptions)")
+        risk_j = st.text_area("Risks, uncertainty and invalidation conditions")
+        entry_j = st.number_input(
+            "Hypothetical entry price (£ per unit)",
+            min_value=0.01,
+            value=100.0,
+            step=1.0,
+        )
+        qty_j = st.number_input(
+            "Hypothetical units (not broker holdings)",
+            min_value=0.00000001,
+            value=1.0,
+            format="%.8f",
+        )
+        stop_j = st.number_input(
+            "Hypothetical stop reference (£; 0 = none)",
+            min_value=0.0,
+            value=0.0,
+            step=1.0,
+        )
+        submitted_j = st.form_submit_button("Record research idea")
+    if submitted_j:
+        body_j = {
+            "symbol": symbol_j,
+            "decision_day": decision_j.isoformat(),
+            "thesis": thesis_j,
+            "risk_note": risk_j,
+            "hypothetical_entry_gbp": str(entry_j),
+            "hypothetical_units": str(qty_j),
+            "planned_stop_gbp": str(stop_j) if stop_j > 0 else None,
+        }
+        saved_j, err_j = post("/journal/ideas", body_j, token_key="tok_journal")
+        if err_j:
+            st.error(f"Journal not saved: {err_j}")
+        else:
+            st.success(f"Research idea {saved_j['id']} recorded. No trade was placed.")
+
+    if st.button("Load my research journal"):
+        st.session_state.journal_items, st.session_state.journal_error = get(
+            "/journal/ideas", token_key="tok_journal"
+        )
+    if st.session_state.get("journal_error"):
+        st.warning(st.session_state.journal_error)
+    if st.session_state.get("journal_items") is not None:
+        items_j = st.session_state.journal_items
+        if not items_j:
+            st.info("No research ideas recorded.")
+        else:
+            st.dataframe(
+                pd.DataFrame(items_j)[
+                    ["id", "symbol", "decision_day", "retrospective", "status", "thesis"]
+                ],
+                hide_index=True,
+                width="stretch",
+            )
+            open_j = [x["id"] for x in items_j if x["status"] == "open"]
+            if open_j:
+                with st.form("journal_outcome"):
+                    selected_j = st.selectbox("Open research idea ID", open_j)
+                    exit_day_j = st.date_input("Hypothetical outcome date", value=date.today())
+                    exit_gbp_j = st.number_input(
+                        "Hypothetical exit price (£ per unit)",
+                        min_value=0.01,
+                        value=100.0,
+                    )
+                    note_j = st.text_area("Outcome note and what changed")
+                    closed_j = st.form_submit_button("Record hypothetical outcome")
+                if closed_j:
+                    outcome_j, err_j = post(
+                        f"/journal/ideas/{selected_j}/close",
+                        {
+                            "outcome_day": exit_day_j.isoformat(),
+                            "hypothetical_exit_gbp": str(exit_gbp_j),
+                            "outcome_note": note_j,
+                        },
+                        token_key="tok_journal",
+                    )
+                    if err_j:
+                        st.error(f"Outcome not saved: {err_j}")
+                    else:
+                        st.success(
+                            f"Research idea {selected_j} closed with gross hypothetical P/L "
+                            f"£{float(outcome_j['hypothetical_gross_pnl_gbp']):,.2f}. "
+                            "No real trade or verified fill is implied."
+                        )
+                        st.session_state.journal_items = None

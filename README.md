@@ -67,6 +67,31 @@ TWR removes the timing of your deposits (how the investments performed); XIRR is
 dated flows (how your money performed). The dashboard explains both, and the benchmark XIRRs end at a closing
 price rather than a live balance so they are comparable with each other.
 
+## Medium-term research and paper journal
+
+The **Stock research** tab includes a deterministic 2–12-week position research workflow, separate
+from the existing five-session ML classifier. The technical screen checks a 20-session breakout,
+50/200-session trend and prior-volume confirmation; stale data is refused. A fixed-rule historical
+backtest executes entry and exit signals at the **next session's open**, applies 10 bps one-way
+hypothetical costs, and compares with buy-and-hold over the identical window. It is not
+walk-forward parameter optimisation or proof of predictive edge; the underlying current-stock
+universe is survivorship-biased.
+
+The risk scenario compares a hypothetical GBP loss budget with a position-concentration cap.
+It can prefill an already loaded GBP portfolio snapshot, but never contacts Trading 212 by itself.
+Missing/ambiguous ticker exposure must be entered by the user; stop distances are not guaranteed
+execution prices.
+
+The **Research journal** tab stores manual hypothetical ideas and outcomes in the local
+PostgreSQL database. It is token-protected, preserves decision and recording dates and marks
+backdated research retrospective. Gross hypothetical P/L excludes spreads, fees, tax and FX, and
+**must not be represented as real or independently verified paper-trading fills**.
+
+There is no current, licensed news-retrieval pipeline in this release. The local LLM agent can
+research from its bounded existing tools; it must not invent recent headlines or claim live news.
+For the detailed implemented-versus-unverified audit, see
+[original scope audit](docs/original-scope-audit.md).
+
 ## AI and ML components
 
 - **Research pipeline.** Target: positive 5-session forward return for 10 US large caps. Point-in-time features,

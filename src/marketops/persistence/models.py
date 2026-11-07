@@ -11,6 +11,7 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     Column,
+    Date,
     DateTime,
     Float,
     Index,
@@ -190,6 +191,29 @@ broker_dividend = Table(
     Column("sync_run_id", Integer, nullable=False),
     UniqueConstraint("environment", "account_key", "source_id", name="uq_dividend_source"),
     Index("ix_dividend_time", "environment", "account_key", "occurred_at"),
+)
+
+
+# Manual hypothetical research journal. NEVER broker executions or inferred fills.
+# Protected by the private API token and held only in the local PostgreSQL database.
+research_journal = Table(
+    "research_journal",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("recorded_utc", DateTime(timezone=True), nullable=False),
+    Column("decision_day", Date, nullable=False),
+    Column("symbol", String(20), nullable=False),
+    Column("thesis", String(1200), nullable=False),
+    Column("risk_note", String(600), nullable=False),
+    Column("hypothetical_entry_gbp", _MONEY, nullable=False),
+    Column("hypothetical_units", _MONEY, nullable=False),
+    Column("planned_stop_gbp", _MONEY),
+    Column("retrospective", Boolean, nullable=False),
+    Column("status", String(16), nullable=False, default="open"),
+    Column("outcome_day", Date),
+    Column("hypothetical_exit_gbp", _MONEY),
+    Column("outcome_note", String(1200)),
+    Index("ix_research_journal_recorded", "recorded_utc"),
 )
 
 
