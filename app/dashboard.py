@@ -837,6 +837,72 @@ with tab_stock:
             st.caption(an["disclaimer"])
             st.dataframe(pd.Series(an["features"], name="value"), width="stretch")
 
+        st.divider()
+        st.subheader("2–12 week technical research")
+        st.caption(
+            "Rule-based historical screen, not a forecast or an order recommendation. "
+            "Uses cached prices only; stale or insufficient data returns unavailable."
+        )
+        if st.button("Evaluate technical conditions"):
+            st.session_state.technical_screen, st.session_state.technical_error = get(
+                f"/research/technical/{sym}"
+            )
+        technical = st.session_state.get("technical_screen")
+        if technical and technical.get("symbol") == sym:
+            st.caption(
+                f"Data through {technical.get('as_of') or 'unknown'}; "
+                f"source: {technical.get('provider') or 'unknown'}"
+            )
+            if technical["state"] == "unavailable":
+                st.warning("; ".join(technical["rationale"]))
+            else:
+                st.info(f"Condition: {technical['state'].replace('_', ' ')}")
+                for reason in technical["rationale"]:
+                    st.caption(reason)
+                st.caption(technical["limitation"])
+        if st.session_state.get("technical_error"):
+            st.warning("Technical screen unavailable: " + st.session_state.technical_error)
+
+        with st.expander("Hypothetical position risk budget (GBP)"):
+            st.caption(
+                "Manual scenario only. No brokerage values are loaded, stored or sent to the API. "
+                "No share quantity, target or trade instruction is generated."
+            )
+            scenario_value = st.number_input(
+                "Hypothetical portfolio value (£)",
+                min_value=1.0,
+                value=10000.0,
+                step=500.0,
+            )
+            scenario_exposure = st.number_input(
+                "Existing exposure to this position (£)",
+                min_value=0.0,
+                value=0.0,
+                max_value=float(scenario_value),
+                step=100.0,
+            )
+            scenario_risk = st.slider("Loss budget (% of portfolio)", 0.1, 5.0, 1.0, 0.1)
+            scenario_cap = st.slider("Position cap (%)", 1.0, 25.0, 10.0, 1.0)
+            scenario_stop = st.slider("Hypothetical stop distance (%)", 1.0, 50.0, 8.0, 1.0)
+            from marketops.decision.technical import size_risk_scenario
+
+            example = size_risk_scenario(
+                scenario_value,
+                scenario_exposure,
+                loss_budget_pct=scenario_risk,
+                position_cap_pct=scenario_cap,
+                stop_distance_pct=scenario_stop,
+            )
+            st.metric(
+                "Illustrative maximum additional notional",
+                f"£{example.maximum_additional_notional_gbp:,.2f}",
+            )
+            st.caption(
+                f"Binding limit: {example.binding_limit}; "
+                f"hypothetical loss budget: £{example.risk_budget_gbp:,.2f}."
+            )
+            st.warning(example.limitation)
+
 # ---------------------------------------------------------------- research agent
 with tab_agent:
     st.caption(
