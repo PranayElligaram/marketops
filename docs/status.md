@@ -1,9 +1,15 @@
-# MarketOps status: v1.0
+# MarketOps status: v1.1.0
 
 Research and engineering project; **not investment advice and not production-ready**. The ML classifier has no
 demonstrated predictive edge. Findings of the independent audit: [technical-audit.md](technical-audit.md).
 
-## Verification (v1.0 release run)
+## Verification (v1.1.0 source on main, 7 November 2026)
+- [CI run 42425408974](https://github.com/PranayElligaram/marketops/actions/runs/42425408974):
+  654 passed, 9 skipped; Ruff, format, strict Mypy, pinned versions and API/dashboard Docker builds passed.
+- This release did not rerun optional PostgreSQL integration or a real browser smoke test for the new journal;
+  prior v1.0 results below are historical, not verification of new features.
+
+## Earlier v1.0 release verification
 - `pytest`: 612 passed, 9 skipped (the skipped tests are the opt-in PostgreSQL integration tests, which run separately
   in Docker below).
 - `ruff check`, `ruff format --check`, strict `mypy src api`: clean.
@@ -59,11 +65,11 @@ the author's real account in this release.
 
 ## Original-roadmap decision support
 
-The completion branch adds deterministic 2–12-week historical research, a technical screen, a
-hypothetical risk-budget scenario and a private manual research journal. These are distinct from
-the five-session ML model and do not demonstrate a trading edge. Verification for the extension
-must be read from the branch CI run, not inferred from the v1.0 test counts above. See
-[the explicit gap audit](original-scope-audit.md).
+Version 1.1.0 adds deterministic 2–12-week historical research, a technical screen, a
+hypothetical GBP risk-budget scenario and a private manual research journal. These are distinct
+from the five-session ML model and do not demonstrate a trading edge. New features are covered
+by the main CI result above. PostgreSQL and browser validation for the new journal remain open.
+See [the original-scope audit](original-scope-audit.md).
 
 ## Known limitations
 - Survivorship bias in the ML universe; no point-in-time membership data is available from the provider.

@@ -1,7 +1,7 @@
 # MarketOps original-scope gap audit (7 November 2026)
 
-This document distinguishes the previously published **v1.0** release from changes being
-validated on the \`complete-original-scope-decision-support\` branch. It is not a claim of
+This document distinguishes the previously published **v1.0** release from the original-scope
+extensions subsequently squash-merged to `main` in version **1.1.0**. It is not a claim of
 production readiness. "Verified" means only the specific checks noted, not a universal guarantee.
 
 | Capability | Agreed requirement | Existing v1.0 | New branch | Verification and remaining gap | Priority |
@@ -48,11 +48,16 @@ is private behind the local API token and lives in PostgreSQL, with no broker-wr
 - No verified forward paper-trading performance history. Backfilled examples must remain labelled.
 - No trading, order submission, account changes or auto-execution by design.
 
-## Release gate
+## Release verification (7 November 2026)
 
-Do not merge this branch or label the original scope complete until the new branch passes lint,
-format, strict Mypy, full offline tests, Docker builds and private API regression checks.
-PostgreSQL integration and UI smoke testing should be repeated against the new journal schema.
-Document any checks blocked by missing infrastructure; do not mark them as passed.
+Merged into `main` via [PR #1](https://github.com/PranayElligaram/marketops/pull/1)
+(squash commit `682ce198`). [Main CI run 42425408974](https://github.com/PranayElligaram/marketops/actions/runs/42425408974)
+completed successfully: **654 passed, 9 skipped**; Ruff lint, Ruff formatting, strict Mypy,
+pinned dependencies and API/dashboard Docker builds passed. The nine skipped tests are opt-in
+PostgreSQL integration tests, not a passed PostgreSQL verification for this extension.
 
-The older \`v1.0.0\` tag remains a historical record and must not be moved.
+Still unverified in this extension: new journal persistence against a real PostgreSQL instance;
+local Docker Compose startup and browser usability; authenticated live Trading 212 benchmark;
+forward paper outcomes and reliable current news retrieval. These are release limitations, not
+claims of functionality. The historical `v1.0.0` tag remains unchanged; package version is `1.1.0`.
+

@@ -13,6 +13,13 @@ checked against tool evidence. It is a **research and engineering project, not i
 
 *Screenshots use the built-in synthetic account only; no real data appears in this repository.*
 
+## Original-roadmap completion (v1.1.0)
+
+This release adds fixed-rule 2–12-week technical research and a matched historical buy-and-hold
+comparison, a GBP hypothetical risk-budget scenario, and a private manual research journal.
+The journal does **not** establish real or forward paper execution performance. The ML result
+remains negative. [Original-scope audit and remaining verification gaps](docs/original-scope-audit.md).
+
 ## The problem
 
 Retail investors see holdings and a headline P/L, but rarely a reconciled answer to "how has my money
