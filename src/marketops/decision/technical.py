@@ -139,7 +139,7 @@ def screen_daily_bars(bars: Sequence[DailyBar], *, as_of: date | None = None) ->
     volume_supported = volume_ratio is not None and volume_ratio >= 1.2
     if breakout and volume_supported:
         state: ScreenState = "breakout_review"
-        rationale = (
+        rationale: tuple[str, ...] = (
             "Close exceeded the preceding 20-session high.",
             "Price is above the 50- and 200-session moving averages.",
             "Volume exceeded 1.2x the preceding 20-session average.",
