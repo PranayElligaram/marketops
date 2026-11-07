@@ -8,7 +8,6 @@ No optimisation, parameter search, broker access or claim of predictive skill.
 from __future__ import annotations
 
 import math
-from datetime import date
 from typing import Any, Literal
 
 import numpy as np
