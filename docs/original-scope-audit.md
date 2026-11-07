@@ -1,0 +1,58 @@
+# MarketOps original-scope gap audit (7 November 2026)
+
+This document distinguishes the previously published **v1.0** release from changes being
+validated on the \`complete-original-scope-decision-support\` branch. It is not a claim of
+production readiness. "Verified" means only the specific checks noted, not a universal guarantee.
+
+| Capability | Agreed requirement | Existing v1.0 | New branch | Verification and remaining gap | Priority |
+|---|---|---|---|---|---|
+| Broker portfolio and history | Read-only positions, orders, cash and dividends | Implemented | Preserved | Historical account reconciliation previously tested; current release does not re-test the live broker | P1 |
+| GBP valuations and SPY comparison | TWR, XIRR, drawdown, contribution-matched index | Implemented | Preserved | Synthetic checks pass in v1.0; new benchmark not yet tested on actual account | P1 |
+| ML experiments | Logistic regression/XGBoost, purged walk-forward, SHAP, MLflow | Implemented | Preserved | Held-out AUC 0.496, no predictive advantage; survivorship bias remains | P1 |
+| 2–12-week strategy evaluation | Deterministic entries/exits, next-open fills, costs, simple baseline | Not in v1.0; 5-session ML backtest exists | Fixed breakout/trend/close-based exit and matched buy-and-hold evaluator | Branch CI pending; does not establish forward profitability or point-in-time constituent coverage | P1 |
+| Portfolio risk | Concentration, limited scenarios, insufficient-data states | Concentration implemented | Manual hypothetical GBP risk and concentration cap; technical screen | Branch CI pending; scenario is manual, not auto-linked to verified broker NAV/FX | P1 |
+| Local research assistant | Ollama, tool-calling, provenance and verification | Implemented | Preserved | Local run previously tested; verifier is lexical and not proof of all factual claims | P1 |
+| News retrieval | Free licensed, fresh sources where approved | No established current news pipeline | No new provider | Blocked pending an acceptable free source and explicit licensing/freshness contract; do not fabricate headlines | P2 |
+| Paper research journal | Record hypothetical decisions and subsequent outcomes | Not implemented | Private, manual PostgreSQL-backed journal with retrospective flag | Branch CI pending; self-reported prices, not verified fills or live paper brokerage | P1 |
+| Dashboard | Usable workflows, no misleading return claims | Implemented | Technical screen, strategy and journal UI | Branch CI pending; browser smoke tests after integration needed | P1 |
+| Reproducibility and CI | Tests, docs, Docker, safe release | v1.0 completed with green GitHub Actions | Branch adds synthetic tests | Need full branch CI, PostgreSQL integration and smoke test before main/release | P1 |
+| Real-account readiness | Read-only compatibility, honest reconciliation | Partial live checks in earlier development | No additional live calls | Real benchmark validation deliberately outstanding; private data never in CI | P1 |
+
+## Research strategy boundary
+
+The added fixed-rule research backtest is long-only, signal-at-close and hypothetical-fill-at-next-open,
+with a 10 bp one-way cost assumption, minimum 10-session holding period for ordinary trend exits,
+maximum 60 sessions, and a close-based breakdown exit which can occur sooner. Its execution is
+a model of historical fills, **not** broker orders or a guaranteed stop. It compares the rule with
+buy-and-hold from the same hypothetical first execution date to the same closing date.
+
+This deterministic screen is **not** trained on the ML held-out test and must not be presented as
+a validated profitable strategy. The research universe consists of current selected stocks and
+has survivorship bias. Prices come from an unofficial personal-use provider and are not redistributed.
+
+## Manual paper research record
+
+Journal entries are deliberate user-created hypotheses with manually specified hypothetical
+GBP entry, size, risk note and optional exit. They carry both the decision date and the actual
+recording timestamp. Earlier decision dates are labelled retrospective. Gross illustrative P/L
+is not execution-confirmed; spreads, FX, fees, taxes and slippage are not calculated. The journal
+is private behind the local API token and lives in PostgreSQL, with no broker-write integration.
+
+## Known limits not solved by new features
+
+- No reliably measured predictive edge: 2022+ ROC-AUC ~0.496 against 0.5 chance.
+- Point-in-time constituent membership and delisted-stock data remain unavailable.
+- No automatically refreshing, provenance-checked current news retrieval.
+- No proof of real-account SPY benchmark end-to-end correctness in the new release.
+- No production-grade security operations, multi-user hosting or managed cloud service.
+- No verified forward paper-trading performance history. Backfilled examples must remain labelled.
+- No trading, order submission, account changes or auto-execution by design.
+
+## Release gate
+
+Do not merge this branch or label the original scope complete until the new branch passes lint,
+format, strict Mypy, full offline tests, Docker builds and private API regression checks.
+PostgreSQL integration and UI smoke testing should be repeated against the new journal schema.
+Document any checks blocked by missing infrastructure; do not mark them as passed.
+
+The older \`v1.0.0\` tag remains a historical record and must not be moved.
