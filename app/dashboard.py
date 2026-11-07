@@ -1,6 +1,7 @@
 """MarketOps dashboard: read-only portfolio view plus ML research results from the API."""
 
 import os
+from datetime import date
 from typing import Any
 
 import httpx
@@ -26,7 +27,7 @@ def post(
     try:
         headers = _private_headers(token_key)
         r = httpx.post(f"{API}{path}", json=body, headers=headers, timeout=timeout)
-        if r.status_code not in (200, 202):
+        if r.status_code not in (200, 201, 202):
             try:
                 return None, r.json().get("detail", f"HTTP {r.status_code}")
             except ValueError:
@@ -391,7 +392,7 @@ if err:
     st.error(f"API or PostgreSQL not ready: {err}")
     st.stop()
 
-tab_port, tab_act, tab_perf, tab_stock, tab_agent, tab_model, tab_bt = st.tabs(
+tab_port, tab_act, tab_perf, tab_stock, tab_agent, tab_model, tab_bt, tab_journal = st.tabs(
     [
         "Portfolio",
         "Portfolio activity",
@@ -400,6 +401,7 @@ tab_port, tab_act, tab_perf, tab_stock, tab_agent, tab_model, tab_bt = st.tabs(
         "AI research agent",
         "Model performance",
         "Backtests",
+        "Research journal",
     ]
 )
 
@@ -1099,3 +1101,108 @@ with tab_bt:
         for a in bt["assumptions"]:
             st.caption(a)
         st.caption("Model strategy parameters were not tuned on the test period.")
+
+
+# -------------------------------------------------------------- manual research journal
+with tab_journal:
+    st.subheader("Hypothetical research journal")
+    st.caption(
+        "Manual research records only. Nothing here places an order or confirms that a trade "
+        "executed. Backdated records are marked retrospective. Hypothetical P/L is gross "
+        "and excludes costs, taxes and FX."
+    )
+    st.text_input(
+        "Local journal access token",
+        type="password",
+        key="tok_journal",
+        help="Private local API token. Never included in a repository or an LLM request.",
+    )
+    with st.form("journal_idea"):
+        symbol_j = st.text_input("Ticker", value="AAPL", max_chars=20)
+        decision_j = st.date_input("Date of research decision", value=date.today())
+        thesis_j = st.text_area("Research thesis (historical evidence and assumptions)")
+        risk_j = st.text_area("Risks, uncertainty and invalidation conditions")
+        entry_j = st.number_input(
+            "Hypothetical entry price (£ per unit)",
+            min_value=0.01,
+            value=100.0,
+            step=1.0,
+        )
+        qty_j = st.number_input(
+            "Hypothetical units (not broker holdings)",
+            min_value=0.00000001,
+            value=1.0,
+            format="%.8f",
+        )
+        stop_j = st.number_input(
+            "Hypothetical stop reference (£; 0 = none)",
+            min_value=0.0,
+            value=0.0,
+            step=1.0,
+        )
+        submitted_j = st.form_submit_button("Record research idea")
+    if submitted_j:
+        body_j = {
+            "symbol": symbol_j,
+            "decision_day": decision_j.isoformat(),
+            "thesis": thesis_j,
+            "risk_note": risk_j,
+            "hypothetical_entry_gbp": str(entry_j),
+            "hypothetical_units": str(qty_j),
+            "planned_stop_gbp": str(stop_j) if stop_j > 0 else None,
+        }
+        saved_j, err_j = post("/journal/ideas", body_j, token_key="tok_journal")
+        if err_j:
+            st.error(f"Journal not saved: {err_j}")
+        else:
+            st.success(f"Research idea {saved_j['id']} recorded. No trade was placed.")
+
+    if st.button("Load my research journal"):
+        st.session_state.journal_items, st.session_state.journal_error = get(
+            "/journal/ideas", token_key="tok_journal"
+        )
+    if st.session_state.get("journal_error"):
+        st.warning(st.session_state.journal_error)
+    if st.session_state.get("journal_items") is not None:
+        items_j = st.session_state.journal_items
+        if not items_j:
+            st.info("No research ideas recorded.")
+        else:
+            st.dataframe(
+                pd.DataFrame(items_j)[
+                    ["id", "symbol", "decision_day", "retrospective", "status", "thesis"]
+                ],
+                hide_index=True,
+                width="stretch",
+            )
+            open_j = [x["id"] for x in items_j if x["status"] == "open"]
+            if open_j:
+                with st.form("journal_outcome"):
+                    selected_j = st.selectbox("Open research idea ID", open_j)
+                    exit_day_j = st.date_input("Hypothetical outcome date", value=date.today())
+                    exit_gbp_j = st.number_input(
+                        "Hypothetical exit price (£ per unit)",
+                        min_value=0.01,
+                        value=100.0,
+                    )
+                    note_j = st.text_area("Outcome note and what changed")
+                    closed_j = st.form_submit_button("Record hypothetical outcome")
+                if closed_j:
+                    outcome_j, err_j = post(
+                        f"/journal/ideas/{selected_j}/close",
+                        {
+                            "outcome_day": exit_day_j.isoformat(),
+                            "hypothetical_exit_gbp": str(exit_gbp_j),
+                            "outcome_note": note_j,
+                        },
+                        token_key="tok_journal",
+                    )
+                    if err_j:
+                        st.error(f"Outcome not saved: {err_j}")
+                    else:
+                        st.success(
+                            f"Research idea {selected_j} closed with gross hypothetical P/L "
+                            f"£{float(outcome_j['hypothetical_gross_pnl_gbp']):,.2f}. "
+                            "No real trade or verified fill is implied."
+                        )
+                        st.session_state.journal_items = None
