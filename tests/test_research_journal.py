@@ -8,7 +8,7 @@ from decimal import Decimal
 from sqlalchemy import select
 
 from marketops.persistence.models import research_journal
-from tests.history_fixtures import Env, TOKEN
+from tests.history_fixtures import TOKEN, Env
 
 
 def _idea() -> dict[str, object]:
@@ -31,7 +31,8 @@ def test_journal_is_private_even_for_synthetic_ideas(env: Env) -> None:
     c = env.client
     assert c.get("/journal/ideas").status_code == 401
     assert c.post("/journal/ideas", json=_idea()).status_code == 401
-    assert c.post("/journal/ideas", json=_idea(), headers={"X-MarketOps-Token": "wrong"}).status_code == 401
+    denied = c.post("/journal/ideas", json=_idea(), headers={"X-MarketOps-Token": "wrong"})
+    assert denied.status_code == 401
     assert c.get("/journal/ideas", headers=_headers()).json() == []
 
 
@@ -57,7 +58,8 @@ def test_create_list_close_and_no_double_outcome(env: Env) -> None:
     final = result.json()
     assert final["status"] == "closed"
     assert Decimal(final["hypothetical_gross_pnl_gbp"]) == Decimal("25.000")
-    assert c.post(f"/journal/ideas/{idea['id']}/close", json=payload, headers=_headers()).status_code == 409
+    again = c.post(f"/journal/ideas/{idea['id']}/close", json=payload, headers=_headers())
+    assert again.status_code == 409
     with env.engine.connect() as con:
         assert con.execute(select(research_journal.c.status)).scalar_one() == "closed"
 
