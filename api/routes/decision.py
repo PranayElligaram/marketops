@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import asdict
-
-import pandas as pd
 from datetime import UTC, datetime
 from typing import Any
 
+import pandas as pd
 from fastapi import APIRouter, HTTPException
 
 from api.routes.research import market_history
@@ -53,7 +52,9 @@ def position_strategy(symbol: str) -> dict[str, Any]:
     try:
         report = evaluate_position_strategy(frame, history.symbol)
     except ValueError:
-        raise HTTPException(502, "Cached historical data cannot support a valid backtest.") from None
+        raise HTTPException(
+            502, "Cached historical data cannot support a valid backtest."
+        ) from None
     return {
         **report,
         "provider": history.provider,
