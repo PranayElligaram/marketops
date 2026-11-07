@@ -94,7 +94,7 @@ def test_prefix_independence() -> None:
     "bar",
     [
         DailyBar(date(2026, 11, 7), 0, 1, 0.5, 100),
-        DailyBar(date(2026, 11, 7), 2, 1, 1.5, 100),
+        DailyBar(date(2026, 11, 7), 1, 2, 1.5, 100),
         DailyBar(date(2026, 11, 7), 3, 1, 2, -1),
         DailyBar(date(2026, 11, 7), float("nan"), 1, 1, 100),
         DailyBar(date(2026, 11, 7), 3, 1, 2, float("inf")),
