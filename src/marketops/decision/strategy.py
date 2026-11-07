@@ -72,9 +72,7 @@ def evaluate_position_strategy(
     if not 0 <= cost_bps <= 100:
         raise ValueError("Cost must be 0–100 bps one-way")
     symbol = symbol.strip().upper()
-    if not symbol or len(symbol) > 20 or not all(
-        c.isalnum() or c in ".-" for c in symbol
-    ):
+    if not symbol or len(symbol) > 20 or not all(c.isalnum() or c in ".-" for c in symbol):
         raise ValueError("Invalid research symbol")
     data = _verified_frame(frame)
     assumptions = (
