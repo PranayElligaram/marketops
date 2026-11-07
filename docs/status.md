@@ -57,6 +57,14 @@ the author's real account in this release.
 - Database writes are best-effort so a DB outage never breaks read-only analysis; tables via `create_all` (no Alembic).
 - No order or trade endpoints exist.
 
+## Original-roadmap decision support
+
+The completion branch adds deterministic 2–12-week historical research, a technical screen, a
+hypothetical risk-budget scenario and a private manual research journal. These are distinct from
+the five-session ML model and do not demonstrate a trading edge. Verification for the extension
+must be read from the branch CI run, not inferred from the v1.0 test counts above. See
+[the explicit gap audit](original-scope-audit.md).
+
 ## Known limitations
 - Survivorship bias in the ML universe; no point-in-time membership data is available from the provider.
 - Raw price data is not reproducible from source (unofficial Yahoo endpoint, retroactive adjustment, personal-use
