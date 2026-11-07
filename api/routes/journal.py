@@ -21,9 +21,7 @@ from api.security import private_access
 from marketops.persistence import database
 from marketops.persistence.models import init_schema, research_journal
 
-router = APIRouter(
-    prefix="/journal", tags=["journal"], dependencies=[Depends(private_access)]
-)
+router = APIRouter(prefix="/journal", tags=["journal"], dependencies=[Depends(private_access)])
 
 SYMBOL = re.compile(r"^[A-Z][A-Z0-9.\-]{0,19}$")
 NOTE = (
@@ -117,9 +115,11 @@ def create_idea(idea: NewIdea) -> JournalEntry:
         with engine.begin() as connection:
             result = connection.execute(insert(research_journal).values(**values))
             key = result.inserted_primary_key[0]
-            row = connection.execute(
-                select(research_journal).where(research_journal.c.id == key)
-            ).mappings().one()
+            row = (
+                connection.execute(select(research_journal).where(research_journal.c.id == key))
+                .mappings()
+                .one()
+            )
             return _entry(dict(row))
     except SQLAlchemyError:
         raise HTTPException(503, "Local journal write failed.") from None
@@ -130,11 +130,13 @@ def list_ideas(limit: Annotated[int, Query(ge=1, le=100)] = 50) -> list[JournalE
     engine = _engine()
     try:
         with engine.connect() as connection:
-            rows = connection.execute(
-                select(research_journal)
-                .order_by(research_journal.c.id.desc())
-                .limit(limit)
-            ).mappings().all()
+            rows = (
+                connection.execute(
+                    select(research_journal).order_by(research_journal.c.id.desc()).limit(limit)
+                )
+                .mappings()
+                .all()
+            )
         return [_entry(dict(row)) for row in rows]
     except SQLAlchemyError:
         raise HTTPException(503, "Local journal read failed.") from None
@@ -147,9 +149,11 @@ def close_idea(idea_id: int, outcome: CloseIdea) -> JournalEntry:
         raise HTTPException(422, "Outcome date must not be in the future.")
     try:
         with engine.begin() as connection:
-            old = connection.execute(
-                select(research_journal).where(research_journal.c.id == idea_id)
-            ).mappings().first()
+            old = (
+                connection.execute(select(research_journal).where(research_journal.c.id == idea_id))
+                .mappings()
+                .first()
+            )
             if old is None:
                 raise HTTPException(404, "Journal idea not found.")
             if old["status"] != "open":
@@ -166,9 +170,11 @@ def close_idea(idea_id: int, outcome: CloseIdea) -> JournalEntry:
                     outcome_note=outcome.outcome_note,
                 )
             )
-            row = connection.execute(
-                select(research_journal).where(research_journal.c.id == idea_id)
-            ).mappings().one()
+            row = (
+                connection.execute(select(research_journal).where(research_journal.c.id == idea_id))
+                .mappings()
+                .one()
+            )
             return _entry(dict(row))
     except SQLAlchemyError:
         raise HTTPException(503, "Local journal update failed.") from None
