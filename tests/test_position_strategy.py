@@ -47,7 +47,8 @@ def test_fixed_entry_exit_and_next_session_execution() -> None:
     assert signals[0]["date"] == str(frame.iloc[220]["date"].date())
     assert signals[0]["execution"] == str(frame.iloc[221]["date"].date())
     assert any(x["action"] == "exit" and "60-session" in x["reason"] for x in signals)
-    assert report["window_start"] == signals[0]["execution"]
+    # The equity baseline is at the preceding signal close, before the next-open fill.
+    assert report["window_start"] == signals[0]["date"]
     assert report["window_end"] == str(frame.iloc[-1]["date"].date())
     assert report["strategy"] is not None and report["buy_and_hold"] is not None
     assert report["trades"][0]["date"] == signals[0]["execution"]
@@ -151,5 +152,5 @@ def test_api_historical_strategy_is_only_synthetic_in_test(
     body = response.json()
     assert body["status"] == "available"
     assert body["provider"] == "synthetic_test"
-    assert body["window_start"] == body["signals"][0]["execution"]
+    assert body["window_start"] == body["signals"][0]["date"]
     assert body["strategy"]["cagr"] is not None
