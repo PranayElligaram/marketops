@@ -53,9 +53,7 @@ def _mean(values: Sequence[float]) -> float:
     return sum(values) / len(values)
 
 
-def screen_daily_bars(
-    bars: Sequence[DailyBar], *, as_of: date | None = None
-) -> TechnicalScreen:
+def screen_daily_bars(bars: Sequence[DailyBar], *, as_of: date | None = None) -> TechnicalScreen:
     """Evaluate the latest bar using historical data only.
 
     The prior-20-day high and volume reference explicitly exclude the latest bar.
@@ -80,20 +78,41 @@ def screen_daily_bars(
         previous = bar.day
     if not bars:
         return TechnicalScreen(
-            None, "unavailable", None, None, None, None, None, None,
+            None,
+            "unavailable",
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
             ("No historical prices available.",),
             "Historical research only; no forecast or trade instruction.",
         )
     last = bars[-1]
     if as_of is not None and (as_of < last.day or (as_of - last.day).days > 7):
         return TechnicalScreen(
-            last.day, "unavailable", None, None, None, None, None, None,
+            last.day,
+            "unavailable",
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
             ("Market data is dated in the future or more than seven days old.",),
             "Refresh price history before evaluating conditions.",
         )
     if len(bars) < 200:
         return TechnicalScreen(
-            last.day, "unavailable", last.close, None, None, None, None, None,
+            last.day,
+            "unavailable",
+            last.close,
+            None,
+            None,
+            None,
+            None,
+            None,
             (f"Need 200 price sessions; only {len(bars)} available.",),
             "No technical assessment with insufficient history.",
         )
@@ -141,8 +160,16 @@ def screen_daily_bars(
         state = "no_action"
         rationale = ("The predefined trend and breakout conditions are not met.",)
     return TechnicalScreen(
-        last.day, state, last.close, sma50, sma200, prior_high, atr, volume_ratio,
-        rationale, "Historical conditions only; no prediction, target price or execution.",
+        last.day,
+        state,
+        last.close,
+        sma50,
+        sma200,
+        prior_high,
+        atr,
+        volume_ratio,
+        rationale,
+        "Historical conditions only; no prediction, target price or execution.",
     )
 
 
@@ -160,8 +187,11 @@ def size_risk_scenario(
     and actual available cash is not checked.
     """
     values = (
-        portfolio_value_gbp, existing_exposure_gbp, loss_budget_pct,
-        position_cap_pct, stop_distance_pct,
+        portfolio_value_gbp,
+        existing_exposure_gbp,
+        loss_budget_pct,
+        position_cap_pct,
+        stop_distance_pct,
     )
     if any(not isinstance(v, (int, float)) or not math.isfinite(v) for v in values):
         raise ValueError("scenario inputs must be finite numbers")
@@ -177,7 +207,11 @@ def size_risk_scenario(
     amount = min(by_risk, by_cap)
     binding = "risk budget" if by_risk < by_cap else "concentration cap"
     return RiskScenario(
-        portfolio_value_gbp, existing_exposure_gbp, risk_budget, amount, binding,
+        portfolio_value_gbp,
+        existing_exposure_gbp,
+        risk_budget,
+        amount,
+        binding,
         "Illustrative only. Stops are not guaranteed; fees, slippage, FX, "
         "cash available and correlated positions are not modelled.",
     )
