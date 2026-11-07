@@ -907,19 +907,43 @@ with tab_stock:
 
         with st.expander("Hypothetical position risk budget (GBP)"):
             st.caption(
-                "Manual scenario only. No brokerage values are loaded, stored or sent to the API. "
-                "No share quantity, target or trade instruction is generated."
+                "Uses a previously loaded GBP portfolio snapshot when available, otherwise "
+                "manual scenario inputs. No extra broker call, API submission, trade or target."
             )
+            previous_pf = st.session_state.get("portfolio")
+            starting_value = 10000.0
+            starting_exposure = 0.0
+            matched_holding = False
+            if previous_pf and previous_pf.get("account_currency") == "GBP":
+                verified_total = previous_pf.get("portfolio_value_incl_cash")
+                if verified_total is not None and float(verified_total) > 0:
+                    starting_value = float(verified_total)
+                    found = [
+                        h
+                        for h in previous_pf.get("holdings", [])
+                        if str(h.get("ticker", "")).upper() == sym
+                    ]
+                    if found:
+                        starting_exposure = sum(float(h["current_value"]) for h in found)
+                        matched_holding = True
+                    st.caption(
+                        "Pre-filled from the last loaded portfolio snapshot, which may be stale. "
+                        + (
+                            "Existing symbol exposure matched exactly."
+                            if matched_holding
+                            else "No exact symbol match: verify existing exposure manually."
+                        )
+                    )
             scenario_value = st.number_input(
                 "Hypothetical portfolio value (£)",
                 min_value=1.0,
-                value=10000.0,
+                value=starting_value,
                 step=500.0,
             )
             scenario_exposure = st.number_input(
                 "Existing exposure to this position (£)",
                 min_value=0.0,
-                value=0.0,
+                value=min(starting_exposure, float(scenario_value)),
                 max_value=float(scenario_value),
                 step=100.0,
             )
