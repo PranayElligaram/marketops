@@ -187,7 +187,7 @@ def test_api_invalid_cache_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
         provider="synthetic",
         price_convention="synthetic",
         terms="Test",
-        rows=[SimpleNamespace(date="2026-11-06", high=1, low=2, close=1, volume=1)]
+        rows=[SimpleNamespace(date="2026-11-06", high=1, low=2, close=1, volume=1)],
     )
     monkeypatch.setattr(decision, "market_history", lambda symbol, days: fake)
     with TestClient(app) as c:
