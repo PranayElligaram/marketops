@@ -13,6 +13,7 @@ from api.routes.decision import router as decision_router
 from api.routes.demo import router as demo_router
 from api.routes.health import router as health_router
 from api.routes.history import router as history_router
+from api.routes.journal import router as journal_router
 from api.routes.performance import router as performance_router
 from api.routes.portfolio import router as portfolio_router
 from api.routes.research import router as research_router
@@ -35,6 +36,7 @@ app.include_router(performance_router)
 app.include_router(demo_router)
 app.include_router(research_router)
 app.include_router(decision_router)
+app.include_router(journal_router)
 app.include_router(agent_router)
 
 
