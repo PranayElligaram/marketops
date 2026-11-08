@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import UTC, date, datetime
 from typing import Any
 
 import httpx
@@ -76,7 +76,7 @@ def test_structural_errors_fail_closed() -> None:
 
 def _client(monkeypatch: pytest.MonkeyPatch, payloads: dict[str, Any]) -> SecClient:
     client = SecClient("Test Suite test@example.com")
-    monkeypatch.setattr(client, "_get_json", lambda url, ttl: payloads[url])
+    monkeypatch.setattr(client, "_fetch", lambda url, ttl: (datetime.now(UTC), payloads[url]))
     return client
 
 
@@ -118,6 +118,58 @@ def test_http_failures_become_unavailable(monkeypatch: pytest.MonkeyPatch) -> No
         SecClient("Test Suite test@example.com")._get_json("https://data.sec.gov/x", 0)
 
 
+def test_retrieved_utc_is_source_fetch_time_not_request_time(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = [datetime(2026, 11, 7, 12, 0, tzinfo=UTC)]
+    fetches: list[str] = []
+
+    class FakeDatetime(datetime):
+        @classmethod
+        def now(cls, tz: Any = None) -> FakeDatetime:  # type: ignore[override]
+            return cls.fromtimestamp(clock[0].timestamp(), tz)
+
+    class Fake:
+        def __init__(self, **kwargs: Any) -> None:
+            pass
+
+        def __enter__(self) -> Fake:
+            return self
+
+        def __exit__(self, *a: object) -> None:
+            return None
+
+        def get(self, url: str) -> httpx.Response:
+            fetches.append(url)
+            body = TICKERS if url == sec_filings.TICKERS_URL else _submissions()
+            return httpx.Response(200, json=body, request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(sec_filings, "datetime", FakeDatetime)
+    monkeypatch.setattr(sec_filings.httpx, "Client", Fake)
+    monkeypatch.setattr(sec_filings, "MIN_INTERVAL_S", 0)
+    mono = [1000.0]
+    monkeypatch.setattr(sec_filings.time, "monotonic", lambda: mono[0])
+    client = SecClient("Test Suite test@example.com")
+
+    first = client.recent_filings("EXMP")["retrieved_utc"]
+    assert first == "2026-11-07T12:00:00+00:00"
+    n = len(fetches)
+
+    # Cached requests, handled later, keep the original fetch timestamp and make no new fetch.
+    for _ in range(2):
+        clock[0] = datetime(2026, 11, 7, 12, 10, tzinfo=UTC)
+        mono[0] += 300
+        assert client.recent_filings("EXMP")["retrieved_utc"] == first
+    assert len(fetches) == n
+
+    # Past the TTL a fresh fetch yields a new timestamp.
+    clock[0] = datetime(2026, 11, 7, 12, 20, tzinfo=UTC)
+    mono[0] += sec_filings.FILINGS_TTL_S + 1
+    fresh = client.recent_filings("EXMP")["retrieved_utc"]
+    assert fresh == "2026-11-07T12:20:00+00:00"
+    assert len(fetches) > n
+
+
 @pytest.fixture
 def api(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     monkeypatch.setenv("MARKETOPS_SEC_USER_AGENT", "Test Suite test@example.com")
@@ -144,7 +196,9 @@ def test_endpoint_success_not_found_and_failure(
         sec_filings.TICKERS_URL: TICKERS,
         sec_filings.SUBMISSIONS_URL.format(cik=1234567): _submissions(),
     }
-    monkeypatch.setattr(SecClient, "_get_json", lambda self, url, ttl: payloads[url])
+    monkeypatch.setattr(
+        SecClient, "_fetch", lambda self, url, ttl: (datetime.now(UTC), payloads[url])
+    )
     ok = api.get("/research/filings/exmp")
     assert ok.status_code == 200 and ok.json()["filings"][0]["form"] == "8-K"
     assert api.get("/research/filings/NOPE").status_code == 404
@@ -153,5 +207,5 @@ def test_endpoint_success_not_found_and_failure(
     def fail(self: SecClient, url: str, ttl: float) -> Any:
         raise SecUnavailable("down")
 
-    monkeypatch.setattr(SecClient, "_get_json", fail)
+    monkeypatch.setattr(SecClient, "_fetch", fail)
     assert api.get("/research/filings/EXMP").status_code == 502

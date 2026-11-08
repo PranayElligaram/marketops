@@ -13,7 +13,7 @@ at £0. Only what is stated below was checked; terms can change.
 | Cost / key | Free, no key or authentication. |
 | Rate limit | 10 requests per second per user (SEC fair access). The client spaces requests at 0.25 s, caches, and makes at most two calls per lookup. |
 | Identification | Automated clients must declare a descriptive User-Agent with a real contact. MarketOps requires `MARKETOPS_SEC_USER_AGENT`; if unset the endpoint returns 503 and makes no network call. No contact is invented. |
-| Provenance | `GET /research/filings/{symbol}` returns CIK, accession number, form, filing date, acceptance time (UTC), item numbers, a link to the primary document on www.sec.gov, the source URL and `retrieved_utc`. |
+| Provenance | `GET /research/filings/{symbol}` returns CIK, accession number, form, filing date, acceptance time (UTC), item numbers, a link to the primary document on www.sec.gov, the source URL and `retrieved_utc` (when SEC was actually queried; a response served from the 15-minute cache keeps its original fetch time). |
 | Validation | The ticker must exist in SEC's own ticker map. Rows must match the accession and document-name patterns, be an allowed form (8-K, 10-K, 10-Q, 6-K, 20-F, 40-F, DEF 14A) and not be dated in the future; bad rows are dropped and structural errors fail closed. Document links are built by MarketOps, never copied from the response. |
 | LLM involvement | None. The data is shown by the dashboard (Stock research tab) and API only; the agent has no filings tool, so it cannot invent or paraphrase filings. |
 

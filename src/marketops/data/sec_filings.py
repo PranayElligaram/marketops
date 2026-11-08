@@ -153,13 +153,17 @@ class SecClient:
         self._headers = {"User-Agent": user_agent, "Accept": "application/json"}
         self._lock = threading.Lock()
         self._last = 0.0
-        self._cache: dict[str, tuple[float, Any]] = {}
+        self._cache: dict[str, tuple[float, datetime, Any]] = {}
 
     def _get_json(self, url: str, ttl: float) -> Any:
+        return self._fetch(url, ttl)[1]
+
+    def _fetch(self, url: str, ttl: float) -> tuple[datetime, Any]:
+        """Return (UTC time the SEC response was actually fetched, data), serving the cache within ttl."""
         now = time.monotonic()
         hit = self._cache.get(url)
         if hit is not None and now - hit[0] < ttl:
-            return hit[1]
+            return hit[1], hit[2]
         with self._lock:
             wait = self._last + MIN_INTERVAL_S - time.monotonic()
             if wait > 0:
@@ -174,16 +178,16 @@ class SecClient:
             data = response.json()
         except (httpx.HTTPError, ValueError):
             raise SecUnavailable("SEC EDGAR could not be reached or returned invalid data.") from None
-        self._cache[url] = (time.monotonic(), data)
-        return data
+        fetched = datetime.now(UTC)
+        self._cache[url] = (time.monotonic(), fetched, data)
+        return fetched, data
 
     def recent_filings(self, ticker: str, limit: int = 15) -> dict[str, Any]:
         try:
             cik, title = cik_for_ticker(self._get_json(TICKERS_URL, TICKER_TTL_S), ticker)
         except KeyError:
             raise LookupError(ticker) from None
-        payload = self._get_json(SUBMISSIONS_URL.format(cik=cik), FILINGS_TTL_S)
-        retrieved = datetime.now(UTC)
+        retrieved, payload = self._fetch(SUBMISSIONS_URL.format(cik=cik), FILINGS_TTL_S)
         name, filings = parse_filings(payload, cik, today=retrieved.date(), limit=limit)
         return {
             "symbol": ticker.upper(),
