@@ -13,7 +13,7 @@ checked against tool evidence. It is a **research and engineering project, not i
 
 *Screenshots use the built-in synthetic account only; no real data appears in this repository.*
 
-## Original-roadmap completion (v1.1.0)
+## Original-roadmap completion (v1.2.0)
 
 This release adds fixed-rule 2–12-week technical research and a matched historical buy-and-hold
 comparison, a GBP hypothetical risk-budget scenario, and a private manual research journal.
@@ -94,8 +94,17 @@ PostgreSQL database. It is token-protected, preserves decision and recording dat
 backdated research retrospective. Gross hypothetical P/L excludes spreads, fees, tax and FX, and
 **must not be represented as real or independently verified paper-trading fills**.
 
-There is no current, licensed news-retrieval pipeline in this release. The local LLM agent can
-research from its bounded existing tools; it must not invent recent headlines or claim live news.
+The journal separates **prospective** ideas (recorded on or before the decision date) from
+**retrospective** ones, records when each outcome was entered (`closed_utc`) and flags outcomes entered
+after their stated date as backfilled. `GET /journal/summary` scores only prospective ideas with
+contemporaneous outcomes. It is a self-reported, gross, tiny-sample tally, not evidence of skill, and
+nothing connects to a broker.
+
+**Company filings.** The Stock research tab can show recent SEC EDGAR filings (8-K, 10-K, 10-Q etc.) with
+accession numbers, links and retrieval time; set `MARKETOPS_SEC_USER_AGENT` to a name and contact as SEC
+requires. This is official filing metadata, not news, and no AI is involved. **There is no news-headline
+pipeline**: no free, licensed, fresh source was found and the agent must not invent headlines
+([details](docs/research-sources.md)).
 For the detailed implemented-versus-unverified audit, see
 [original scope audit](docs/original-scope-audit.md).
 

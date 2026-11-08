@@ -1,9 +1,28 @@
-# MarketOps status: v1.1.0
+# MarketOps status: v1.2.0
 
 Research and engineering project; **not investment advice and not production-ready**. The ML classifier has no
 demonstrated predictive edge. Findings of the independent audit: [technical-audit.md](technical-audit.md).
 
-## Verification (v1.1.0 source on main, 7 November 2026)
+## Verification of v1.2.0 (8 November 2026, local)
+- Full `pytest`: 666 passed, 17 skipped (opt-in PostgreSQL tests).
+- Real PostgreSQL 17 via Docker Compose (`scripts/run_integration_tests.sh`): 34 passed, 1 skipped (MLflow not in the
+  slim image). New `tests/test_journal_postgres.py` covers create/read, NUMERIC(24,8) decimal and date persistence,
+  retrospective flag, close and duplicate-close 409, four-way concurrent close (exactly one wins), persistence across
+  connection restart, auth with nothing written, no broker/order surface, and `closed_utc` migration of a legacy table.
+- `ruff check`, `ruff format --check`, `mypy --strict src api`: clean.
+- Docker Compose: db, api, dashboard healthy; `/health/ready` ready; journal 401 without a token. A journal row created
+  before `closed_utc` existed was migrated in place and reported as unknown, never guessed.
+- Browser (Chrome; synthetic prices and portfolio on a throwaway Compose project with a throwaway token and no broker
+  keys; 1280 and 1440 px css widths in same-origin frames): Portfolio, Portfolio activity, Historical performance with
+  S&P 500 comparison, Stock research (technical screen, strategy report, risk scenario), AI agent unavailable/template
+  fallback, Model performance, Backtests and Research journal (create, list, close, summary) render with no
+  exceptions and no horizontal overflow. Journal create and close were confirmed in the database. No UI defects found.
+- Fixed: a check-then-update race let two concurrent closes both pass the already-closed check; the update is now
+  conditional on `status = 'open'`.
+- Not verified: live SEC EDGAR retrieval; the real Trading 212 account and real-account benchmark; Ollama with a model
+  present during the browser run; GPU. The CI result for the release commit is on GitHub Actions.
+
+## Earlier verification (v1.1.0 source on main, 7 November 2026)
 - [CI run 42425408974](https://github.com/PranayElligaram/marketops/actions/runs/42425408974):
   654 passed, 9 skipped; Ruff, format, strict Mypy, pinned versions and API/dashboard Docker builds passed.
 - This release did not rerun optional PostgreSQL integration or a real browser smoke test for the new journal;
@@ -67,8 +86,9 @@ the author's real account in this release.
 
 Version 1.1.0 adds deterministic 2–12-week historical research, a technical screen, a
 hypothetical GBP risk-budget scenario and a private manual research journal. These are distinct
-from the five-session ML model and do not demonstrate a trading edge. New features are covered
-by the main CI result above. PostgreSQL and browser validation for the new journal remain open.
+from the five-session ML model and do not demonstrate a trading edge. PostgreSQL and
+browser validation of the journal are recorded above (v1.2.0). v1.2.0 adds SEC filing metadata
+([research sources](research-sources.md)) and prospective-versus-backfilled journal tracking.
 See [the original-scope audit](original-scope-audit.md).
 
 ## Known limitations

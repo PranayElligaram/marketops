@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     # Required (header X-MarketOps-Token) for any agent request that touches broker data or
     # reads the agent audit log while broker access is enabled. Empty = broker path refused.
     agent_api_token: str = ""
+    # SEC fair access requires a descriptive User-Agent with a real contact, e.g.
+    # "Jane Doe jane@example.com". Empty disables the filings endpoint; nothing is invented.
+    sec_user_agent: str = ""
 
     @property
     def broker_configured(self) -> bool:

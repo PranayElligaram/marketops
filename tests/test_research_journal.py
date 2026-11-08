@@ -115,3 +115,62 @@ def test_outcome_must_be_after_decision_and_not_in_future(env: Env) -> None:
         headers=_headers(),
     )
     assert missing.status_code == 404
+
+
+def _close_payload(day: str, price: str = "110") -> dict[str, str]:
+    return {
+        "outcome_day": day,
+        "hypothetical_exit_gbp": price,
+        "outcome_note": "Manual research outcome, not a real fill",
+    }
+
+
+def test_summary_scores_only_contemporaneous_prospective_outcomes(env: Env) -> None:
+    c, today = env.client, datetime.now(UTC).date()
+    assert c.get("/journal/summary").status_code == 401
+    live = c.post("/journal/ideas", json=_idea(), headers=_headers()).json()
+    late = c.post("/journal/ideas", json=_idea(), headers=_headers()).json()
+    retro = c.post(
+        "/journal/ideas",
+        json=_idea() | {"decision_day": (today - timedelta(days=5)).isoformat()},
+        headers=_headers(),
+    ).json()
+    c.post("/journal/ideas", json=_idea(), headers=_headers())  # stays open
+    for key in (live["id"], late["id"], retro["id"]):
+        res = c.post(
+            f"/journal/ideas/{key}/close",
+            json=_close_payload(today.isoformat()),
+            headers=_headers(),
+        )
+        assert res.status_code == 200 and res.json()["outcome_backfilled"] is False
+    # Simulate an outcome that was entered long after its stated outcome day.
+    with env.engine.begin() as con:
+        con.execute(
+            research_journal.update()
+            .where(research_journal.c.id == late["id"])
+            .values(closed_utc=datetime.now(UTC) + timedelta(days=3))
+        )
+    out = c.get("/journal/summary", headers=_headers()).json()
+    assert out["total"] == 4 and out["retrospective"] == 1
+    assert out["prospective_open"] == 1 and out["prospective_closed"] == 2
+    assert out["scored_contemporaneous"] == 1 and out["scored_gains"] == 1
+    assert Decimal(out["mean_gross_return"]) == Decimal("0.1")
+    assert "skill or edge" in out["note"]
+    rows = {r["id"]: r for r in c.get("/journal/ideas", headers=_headers()).json()}
+    assert rows[late["id"]]["outcome_backfilled"] is True
+    assert rows[retro["id"]]["elapsed_days"] == 5
+
+
+def test_legacy_closed_rows_are_unknown_not_guessed(env: Env) -> None:
+    c = env.client
+    idea = c.post("/journal/ideas", json=_idea(), headers=_headers()).json()
+    c.post(
+        f"/journal/ideas/{idea['id']}/close",
+        json=_close_payload(datetime.now(UTC).date().isoformat()),
+        headers=_headers(),
+    )
+    with env.engine.begin() as con:
+        con.execute(research_journal.update().values(closed_utc=None))
+    row = c.get("/journal/ideas", headers=_headers()).json()[0]
+    assert row["outcome_backfilled"] is None
+    assert c.get("/journal/summary", headers=_headers()).json()["scored_contemporaneous"] == 0

@@ -905,6 +905,37 @@ with tab_stock:
         if st.session_state.get("strategy_error"):
             st.warning("Historical strategy unavailable: " + st.session_state.strategy_error)
 
+        st.divider()
+        st.subheader("Company filings (SEC EDGAR)")
+        st.caption(
+            "Official filing metadata only, not news or analysis; no AI is involved. "
+            "US-listed issuers only. Needs MARKETOPS_SEC_USER_AGENT on the API."
+        )
+        if st.button("Load recent SEC filings"):
+            st.session_state.sec_filings, st.session_state.sec_error = get(
+                f"/research/filings/{sym}"
+            )
+        filings = st.session_state.get("sec_filings")
+        if filings and filings.get("symbol") == sym:
+            st.caption(
+                f"{filings['company']} (CIK {filings['cik']}). Retrieved "
+                f"{filings['retrieved_utc']} from {filings['source']}. {filings['attribution']}"
+            )
+            if filings["filings"]:
+                st.dataframe(
+                    pd.DataFrame(filings["filings"])[
+                        ["filing_date", "form", "items", "description", "accession_number", "url"]
+                    ],
+                    hide_index=True,
+                    width="stretch",
+                    column_config={"url": st.column_config.LinkColumn("document")},
+                )
+            else:
+                st.info("No matching recent filings were returned.")
+            st.caption(filings["limitation"])
+        if st.session_state.get("sec_error"):
+            st.warning("Filings unavailable: " + st.session_state.sec_error)
+
         with st.expander("Hypothetical position risk budget (GBP)"):
             st.caption(
                 "Uses a previously loaded GBP portfolio snapshot when available, otherwise "
@@ -1227,6 +1258,23 @@ with tab_journal:
         )
     if st.session_state.get("journal_error"):
         st.warning(st.session_state.journal_error)
+    if st.button("Show prospective-only summary"):
+        st.session_state.journal_summary, st.session_state.journal_summary_error = get(
+            "/journal/summary", token_key="tok_journal"
+        )
+    if st.session_state.get("journal_summary_error"):
+        st.warning(st.session_state.journal_summary_error)
+    summary_j = st.session_state.get("journal_summary")
+    if summary_j:
+        mean_j = summary_j["mean_gross_return"]
+        st.caption(
+            f"{summary_j['prospective_open']} prospective open, "
+            f"{summary_j['prospective_closed']} prospective closed, "
+            f"{summary_j['retrospective']} retrospective (excluded). "
+            f"Scored (contemporaneous outcomes): {summary_j['scored_contemporaneous']}, "
+            f"of which {summary_j['scored_gains']} gross gains; mean gross return "
+            f"{'n/a' if mean_j is None else f'{float(mean_j):+.2%}'}. {summary_j['note']}"
+        )
     if st.session_state.get("journal_items") is not None:
         items_j = st.session_state.journal_items
         if not items_j:
@@ -1234,7 +1282,19 @@ with tab_journal:
         else:
             st.dataframe(
                 pd.DataFrame(items_j)[
-                    ["id", "symbol", "decision_day", "retrospective", "status", "thesis"]
+                    [
+                        "id",
+                        "symbol",
+                        "decision_day",
+                        "retrospective",
+                        "status",
+                        "elapsed_days",
+                        "hypothetical_entry_gbp",
+                        "hypothetical_exit_gbp",
+                        "hypothetical_gross_pnl_gbp",
+                        "outcome_backfilled",
+                        "thesis",
+                    ]
                 ],
                 hide_index=True,
                 width="stretch",

@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from datetime import UTC, date, datetime
 from decimal import Decimal
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field, model_validator
@@ -75,8 +75,26 @@ class JournalEntry(BaseModel):
     outcome_day: date | None
     hypothetical_exit_gbp: Decimal | None
     outcome_note: str | None
+    closed_utc: datetime | None
     hypothetical_gross_pnl_gbp: Decimal | None
+    elapsed_days: int
+    outcome_backfilled: bool | None
     limitation: str = NOTE
+
+
+class JournalSummary(BaseModel):
+    total: int
+    retrospective: int
+    prospective_open: int
+    prospective_closed: int
+    scored_contemporaneous: int
+    scored_gains: int
+    mean_gross_return: Decimal | None
+    note: str = (
+        "Only ideas recorded on or before their decision date and closed with a contemporaneous "
+        "outcome are scored. Gross, unaudited, self-reported prices; the sample is too small and "
+        "selection-biased for any statement about skill or edge."
+    )
 
 
 def _engine() -> Engine:
@@ -90,7 +108,7 @@ def _engine() -> Engine:
         ) from None
 
 
-def _entry(row: dict[str, object]) -> JournalEntry:
+def _entry(row: dict[str, Any]) -> JournalEntry:
     price = row.get("hypothetical_exit_gbp")
     pnl = (
         (Decimal(str(price)) - Decimal(str(row["hypothetical_entry_gbp"])))
@@ -98,7 +116,22 @@ def _entry(row: dict[str, object]) -> JournalEntry:
         if price is not None
         else None
     )
-    return JournalEntry.model_validate({**row, "hypothetical_gross_pnl_gbp": pnl})
+    end = row["outcome_day"] if row.get("outcome_day") else datetime.now(UTC).date()
+    closed = row.get("closed_utc")
+    # Unknown (None) for outcomes recorded before closed_utc existed: never guessed.
+    backfilled = (
+        None
+        if row.get("outcome_day") is None or closed is None
+        else row["outcome_day"] < closed.replace(tzinfo=closed.tzinfo or UTC).astimezone(UTC).date()
+    )
+    return JournalEntry.model_validate(
+        {
+            **row,
+            "hypothetical_gross_pnl_gbp": pnl,
+            "elapsed_days": (end - row["decision_day"]).days,
+            "outcome_backfilled": backfilled,
+        }
+    )
 
 
 @router.post("/ideas", response_model=JournalEntry, status_code=201)
@@ -145,6 +178,38 @@ def list_ideas(limit: Annotated[int, Query(ge=1, le=100)] = 50) -> list[JournalE
         raise HTTPException(503, "Local journal read failed.") from None
 
 
+@router.get("/summary", response_model=JournalSummary)
+def summary() -> JournalSummary:
+    """Prospective-only tally. Retrospective ideas and backfilled outcomes never enter the stats."""
+    engine = _engine()
+    try:
+        with engine.connect() as connection:
+            rows = [dict(r) for r in connection.execute(select(research_journal)).mappings()]
+    except SQLAlchemyError:
+        raise HTTPException(503, "Local journal read failed.") from None
+    entries = [_entry(r) for r in rows]
+    prospective = [e for e in entries if not e.retrospective]
+    scored = [
+        e
+        for e in prospective
+        if e.status == "closed" and e.outcome_backfilled is False and e.hypothetical_exit_gbp
+    ]
+    returns = [
+        e.hypothetical_exit_gbp / e.hypothetical_entry_gbp - 1
+        for e in scored
+        if e.hypothetical_exit_gbp
+    ]
+    return JournalSummary(
+        total=len(entries),
+        retrospective=len(entries) - len(prospective),
+        prospective_open=sum(e.status == "open" for e in prospective),
+        prospective_closed=sum(e.status == "closed" for e in prospective),
+        scored_contemporaneous=len(scored),
+        scored_gains=sum(r > 0 for r in returns),
+        mean_gross_return=(sum(returns, Decimal(0)) / len(returns)) if returns else None,
+    )
+
+
 @router.post("/ideas/{idea_id}/close", response_model=JournalEntry)
 def close_idea(idea_id: int, outcome: CloseIdea) -> JournalEntry:
     engine = _engine()
@@ -163,16 +228,19 @@ def close_idea(idea_id: int, outcome: CloseIdea) -> JournalEntry:
                 raise HTTPException(409, "This research idea already has an outcome.")
             if outcome.outcome_day < old["decision_day"]:
                 raise HTTPException(422, "Outcome cannot predate the original decision.")
-            connection.execute(
+            claimed = connection.execute(
                 update(research_journal)
-                .where(research_journal.c.id == idea_id)
+                .where(research_journal.c.id == idea_id, research_journal.c.status == "open")
                 .values(
                     status="closed",
                     outcome_day=outcome.outcome_day,
                     hypothetical_exit_gbp=outcome.hypothetical_exit_gbp,
                     outcome_note=outcome.outcome_note,
+                    closed_utc=datetime.now(UTC),
                 )
             )
+            if claimed.rowcount != 1:
+                raise HTTPException(409, "This research idea already has an outcome.")
             row = (
                 connection.execute(select(research_journal).where(research_journal.c.id == idea_id))
                 .mappings()

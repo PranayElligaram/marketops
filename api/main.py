@@ -11,6 +11,7 @@ from starlette.responses import Response
 from api.routes.agent import router as agent_router
 from api.routes.decision import router as decision_router
 from api.routes.demo import router as demo_router
+from api.routes.filings import router as filings_router
 from api.routes.health import router as health_router
 from api.routes.history import router as history_router
 from api.routes.journal import router as journal_router
@@ -36,6 +37,7 @@ app.include_router(performance_router)
 app.include_router(demo_router)
 app.include_router(research_router)
 app.include_router(decision_router)
+app.include_router(filings_router)
 app.include_router(journal_router)
 app.include_router(agent_router)
 

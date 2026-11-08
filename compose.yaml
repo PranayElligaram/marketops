@@ -38,6 +38,8 @@ services:
       # Guards /portfolio/overview and broker-backed agent runs. Only the API receives it;
       # the dashboard container never gets the secret (the user types it per session).
       MARKETOPS_AGENT_API_TOKEN: ${MARKETOPS_AGENT_API_TOKEN:-}
+      # Contact string SEC EDGAR requires from automated clients; unset disables /research/filings.
+      MARKETOPS_SEC_USER_AGENT: ${MARKETOPS_SEC_USER_AGENT:-}
     volumes:
       # Local market data and trained models: read-only, never baked into the image.
       - ./data/raw:/data/raw:ro

@@ -23,6 +23,7 @@ from sqlalchemy import (
     UniqueConstraint,
     insert,
     select,
+    text,
 )
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
@@ -213,12 +214,19 @@ research_journal = Table(
     Column("outcome_day", Date),
     Column("hypothetical_exit_gbp", _MONEY),
     Column("outcome_note", String(1200)),
+    Column("closed_utc", DateTime(timezone=True)),
     Index("ix_research_journal_recorded", "recorded_utc"),
 )
 
 
 def init_schema(engine: Engine) -> None:
     metadata.create_all(engine)
+    if engine.dialect.name == "postgresql":
+        # create_all never alters an existing table; journals created before closed_utc existed.
+        with engine.begin() as c:
+            c.execute(
+                text("ALTER TABLE research_journal ADD COLUMN IF NOT EXISTS closed_utc TIMESTAMPTZ")
+            )
 
 
 def register_model(engine: Engine, meta: dict[str, Any]) -> None:
